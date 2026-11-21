@@ -1,0 +1,26 @@
+{
+  "name": "btr_ghcp",
+  "version": "0.2.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "btr": "src/main.ts"
+  },
+  "scripts": {
+    "start": "bun src/main.ts",
+    "demo": "BTR_AGENT='bun test/fake-agent.ts' bun src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^2.7.0",
+    "@opentui/core": "^0.9.0",
+    "diff": "9.0.0"
+  }
+}
