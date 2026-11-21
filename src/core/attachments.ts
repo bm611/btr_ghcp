@@ -1,8 +1,8 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, extname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readImage } from "./clipboard";
 
 const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -58,26 +58,10 @@ export class Attachments {
     }
   }
 
-  /** The image on the system clipboard as a placeholder, or null when there is none. macOS only. */
+  /** The image on the system clipboard as a placeholder, or null when there is none. */
   async imageFromClipboard(): Promise<string | null> {
-    if (process.platform !== "darwin") return null;
-    const file = join(tmpdir(), `btr-clipboard-${process.pid}.png`);
-    const script = [
-      "set png to the clipboard as «class PNGf»",
-      `set f to open for access POSIX file ${JSON.stringify(file)} with write permission`,
-      "set eof f to 0",
-      "write png to f",
-      "close access f",
-    ];
-    try {
-      const proc = Bun.spawn(["osascript", ...script.flatMap((line) => ["-e", line])], { stdout: "ignore", stderr: "ignore" });
-      if ((await proc.exited) !== 0) return null;
-      const bytes = new Uint8Array(await Bun.file(file).arrayBuffer());
-      await Bun.file(file).delete().catch(() => {});
-      return bytes.length ? this.image(bytes, "image/png") : null;
-    } catch {
-      return null;
-    }
+    const bytes = await readImage();
+    return bytes ? this.image(bytes, "image/png") : null;
   }
 
   /** The prompt as the agent should see it: placeholders expanded, images and mentioned files attached. */
@@ -104,11 +88,6 @@ export class Attachments {
       links.push({ type: "resource_link", uri: pathToFileURL(abs).href, name: basename(abs) || rel, ...(info.isFile() ? { size: info.size } : {}) });
     }
     return [{ type: "text", text: body }, ...links, ...images];
-  }
-
-  clear() {
-    this.pastes.clear();
-    this.images.clear();
   }
 }
 

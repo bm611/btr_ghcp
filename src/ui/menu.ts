@@ -1,6 +1,7 @@
-import { BoxRenderable, type CliRenderer, type KeyEvent, type Renderable, StyledText, type TextChunk, TextRenderable, bg, bold, fg } from "@opentui/core";
-import { fuzzyFilter } from "./files";
-import { G, hatchedTitle, type Theme } from "./theme";
+import { BoxRenderable, type CliRenderer, type KeyEvent, type Renderable, type StyledText, type TextChunk, TextRenderable, bg, bold, fg } from "@opentui/core";
+import { fuzzyFilter } from "../core/fuzzy";
+import { hatchedTitle, styled } from "./text";
+import { G, type Theme } from "./theme";
 
 export type MenuOption = {
   label: string;
@@ -42,15 +43,15 @@ export type MenuRequest = {
 
 type Pending = MenuRequest & { resolve: (value: string | null) => void };
 
+/** Rows of options shown at once; the list scrolls past that. */
 const VISIBLE = 12;
-const chunk = (text: string): TextChunk => ({ __isChunk: true, text });
-const styled = (...parts: (TextChunk | string)[]) => new StyledText(parts.map((p) => (typeof p === "string" ? chunk(p) : p)));
 
 /**
- * Pickers (the command palette, models, sessions) open in a box in the middle of the
- * screen. Permission requests rise from the bottom as a panel under a divider instead,
- * next to the tool call they ask about. Either way: a title, the options, a dim line of keys.
- * Dialogs over the interface: the command palette, pickers, permission requests.
+ * Dialogs over the interface. Pickers (the command palette, models, sessions) open in a
+ * box in the middle of the screen; permission requests (`buttons`) rise from the bottom as
+ * a panel under a divider instead, next to the tool call they ask about. Either way: a
+ * title, the options, a dim line of keys.
+ *
  * Requests can overlap (parallel tool calls), so they queue and the oldest shows.
  * Replacing an open request would answer it as cancelled, which denies that tool call.
  */
@@ -122,11 +123,6 @@ export class Menus {
 
   get active() {
     return this.queue.length > 0;
-  }
-
-  /** The title of the open dialog, if any. */
-  get current() {
-    return this.queue[0]?.title;
   }
 
   open(req: MenuRequest) {
@@ -234,10 +230,10 @@ export class Menus {
 
     if (p.buttons) {
       // One numbered button per row, the chosen one filled bright: fx's approval choices.
-      const parts: TextChunk[] = [];
+      const parts: (TextChunk | string)[] = [];
       this.shown.forEach((o, i) => {
         const on = i === this.selected;
-        if (i) parts.push(chunk("\n"));
+        if (i) parts.push("\n");
         const label = ` ${i + 1}  ${o.label} `.slice(0, inner);
         parts.push(on ? bold(bg(th.primary)(fg(th.onPrimary)(label))) : bg(th.bgRaised)(fg(th.fg)(label)));
       });
@@ -277,8 +273,8 @@ export class Menus {
     this.help.content = helpLine(th, keys, inner);
   }
 
-  /** Handles a key while a request is open. Returns "cancel" when the user dismissed it with Esc or Ctrl+C. */
-  handleKey(key: KeyEvent): "cancel" | void {
+  /** Handles a key while a request is open. Esc and Ctrl+C dismiss it, answering null. */
+  handleKey(key: KeyEvent): void {
     const p = this.queue[0];
     if (!p) return;
     const move = (delta: number) => {
@@ -286,10 +282,7 @@ export class Menus {
       this.selected = (this.selected + delta + this.shown.length) % this.shown.length;
       this.draw();
     };
-    if (key.name === "escape" || (key.ctrl && key.name === "c")) {
-      this.settle(null);
-      return "cancel";
-    }
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) return this.settle(null);
     if (key.name === "tab" && p.tabs && p.tabs.length > 1 && !this.filter) {
       this.tab = (this.tab + (key.shift ? -1 : 1) + p.tabs.length) % p.tabs.length;
       this.selected = 0;
@@ -341,7 +334,7 @@ function placeholderWithCursor(th: Theme, text: string): TextChunk[] {
 }
 
 /** "key desc • key desc", cut to `width` cells. */
-export function helpLine(th: Theme, keys: [string, string][], width: number): StyledText {
+function helpLine(th: Theme, keys: [string, string][], width: number): StyledText {
   const parts: TextChunk[] = [];
   let used = 0;
   for (const [k, d] of keys) {

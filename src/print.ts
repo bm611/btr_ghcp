@@ -1,4 +1,6 @@
-import { AGENT_LOG, choices, selectOption, startAgent } from "./agent";
+import { findChoice, selectOption } from "./agent/config-options";
+import { AGENT_LOG, startAgent } from "./agent/connection";
+import { errorText } from "./core/format";
 
 export type PrintOptions = {
   cwd: string;
@@ -33,7 +35,7 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
       return option ? { outcome: "selected", optionId: option.optionId } : { outcome: "cancelled" };
     },
   }).catch((err) => {
-    console.error("btr: failed to start the agent:", err?.message ?? err, `\nAgent log: ${AGENT_LOG}`);
+    console.error("btr: failed to start the agent:", errorText(err), `\nAgent log: ${AGENT_LOG}`);
     return null;
   });
   if (!agent) return 1;
@@ -49,8 +51,7 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
     for (const [category, wanted] of [["model", opts.model], ["mode", opts.mode]] as const) {
       if (!wanted) continue;
       const o = selectOption(agent.configOptions, category);
-      const w = wanted.toLowerCase();
-      const match = o && choices(o).find((c) => c.value.toLowerCase() === w || c.name.toLowerCase() === w || c.name.toLowerCase().startsWith(w));
+      const match = o && findChoice(o, wanted);
       if (!o || !match) console.error(`btr: no ${category} matches "${wanted}"`);
       else await agent.setConfigOption(o.id, match.value);
     }
@@ -62,8 +63,8 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
       return 1;
     }
     return 0;
-  } catch (err: any) {
-    console.error("btr:", err?.message ?? err);
+  } catch (err) {
+    console.error("btr:", errorText(err));
     return 1;
   } finally {
     agent.stop();

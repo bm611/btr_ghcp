@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "bun src/main.ts",
-    "demo": "BTR_AGENT='bun test/fake-agent.ts' bun src/main.ts",
+    "demo": "BTR_AGENT='bun test/fixtures/fake-agent.ts' bun src/main.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

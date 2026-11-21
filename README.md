@@ -34,7 +34,7 @@ btr [options] [prompt]
 
 `BTR_AGENT="gemini --experimental-acp" bun start` runs a different agent. The agent's stderr goes to `$TMPDIR/btr_ghcp-agent.log`. Settings and prompt history live in `~/.btr` (`BTR_HOME` moves them).
 
-`bun run demo` opens the interface against a scripted fake agent (`test/fake-agent.ts`), which is the quickest way to see every part of it without spending Copilot requests.
+`bun run demo` opens the interface against a scripted fake agent (`test/fixtures/fake-agent.ts`), which is the quickest way to see every part of it without spending Copilot requests.
 
 ## The prompt
 
@@ -115,18 +115,62 @@ Replies are styled after glow's dark and light styles: headings keep their `##` 
 ```sh
 bun start          # the interface
 bun run demo       # the interface against the fake agent
-bun test           # unit tests
+bun test           # unit tests, and the interface against the fake agent
 bun run typecheck
 ```
 
 ## Layout
 
-- `src/main.ts` parses the command line and starts the interface or print mode.
-- `src/tui.ts` is the interface: layout, keys, prompt, suggestions, commands, turns.
-- `src/transcript.ts` holds the conversation as items and draws each one; it redraws them all on a theme or verbosity change.
-- `src/menu.ts` draws the centered dialogs: the command palette, pickers, searches and permission requests.
-- `src/agent.ts` starts the ACP agent and wraps its session API (new, load, list, prompt, cancel, config options).
-- `src/tools.ts` turns a tool call into its header, summary, output and patches.
-- `src/attachments.ts` handles pastes, images and `@` mentions; `src/files.ts` indexes and fuzzy-matches paths.
-- `src/config.ts` stores settings and history; `src/theme.ts` has the palettes, glyphs, gradients and logo.
-- `src/print.ts` is `--print`.
+The code is in four layers. Each imports only from the ones above it.
+
+```
+src/
+  main.ts, cli.ts       the command line: parse arguments, then start the interface or print mode
+  print.ts              --print: one prompt, the reply on stdout
+  version.ts            the version, read from package.json
+  core/                 logic with no interface
+    tools.ts            a tool call's header, summary, output and patches
+    attachments.ts      pastes, images and @ mentions in a prompt
+    files.ts, fuzzy.ts  the file index for @ mentions, and fuzzy matching
+    format.ts           durations, token counts, paths and truncation
+    clipboard.ts        the system clipboard (macOS)
+  agent/                talking to the agent
+    connection.ts       starts the ACP agent and wraps its session API
+    config-options.ts   reading the agent's model, mode and permission options
+    copilot.ts          what only Copilot provides (the model "auto" picked)
+  ui/                   OpenTUI building blocks, which know nothing of the app
+    theme.ts            the palettes, glyphs and syntax colors
+    glow.ts             glow's look for Markdown replies
+    text.ts             styled text, tones, gradients and hatched titles
+    transcript.ts       the conversation as items, and how each is drawn
+    menu.ts             the centered dialogs and the permission panel
+  tui/                  the interface
+    index.ts            builds the parts below and starts the agent and session
+    app.ts              the App object the parts share
+    view.ts             the layout's nodes
+    look.ts             the theme in use
+    chrome.ts           the status line, sidebar, shortcut panel, to-dos and working line
+    conversation.ts     session updates, turns, the queue, and sessions
+    permission.ts       the permission request panel
+    options.ts          switching model and mode, and yolo mode
+    prompt.ts           the prompt: completions, history, pastes, editor, stash
+    modes.ts            the ! shell and # note modes
+    commands.ts         every command: the palette, /commands and their keys
+    keys.ts             the keyboard, and the shortcut panel's list
+    settings.ts, history.ts   what is kept in ~/.btr
+test/
+  fixtures/fake-agent.ts   the scripted agent behind `bun run demo` and the interface tests
+  tui.test.ts              drives the interface against it in a headless renderer
+```
+
+Each `tui/` module exports `createX(app)`. It keeps its own state and reaches the other parts through `app` when it runs, so a feature can live in a file of its own.
+
+### Adding a feature
+
+- **A command**: add an entry to the list in `tui/commands.ts`. Its `label` puts it in the palette, `slash` makes it a typed `/command`, and `key` binds a shortcut. To list the shortcut in the ctrl+g panel, add it to `HELP_KEYS` in `tui/keys.ts`.
+- **A theme**: add an entry to `themes` in `ui/theme.ts`. The picker, `/theme` and the settings pick it up.
+- **A setting**: add it to `Settings` and `DEFAULT_SETTINGS` in `tui/settings.ts`.
+- **A prompt mode** like `!` or `#`: add it to `InputMode` in `ui/transcript.ts`, then give it an entry in `MODES` and a runner in `tui/modes.ts`. The compiler points out anything you missed.
+- **A session update** from the agent: add a case to `onUpdate` in `tui/conversation.ts`. If it adds something new to the transcript, add an `Item` type and its drawing in `ui/transcript.ts`.
+- **A kind of tool call**: name it in `toolHeader` (`core/tools.ts`), then give its verbs and icon in `TOOLS` (`ui/transcript.ts`).
+- **A command-line flag**: add it in `cli.ts`, with a test in `test/cli.test.ts`.

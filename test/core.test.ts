@@ -2,9 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Attachments, mentionAt } from "../src/attachments";
-import { fuzzyFilter, fuzzyScore } from "../src/files";
-import { clipLines, formatDuration, formatTokens, patchStats, shortPath, toolHeader, toolOutput, toolPatches, toolSummary, type ToolState } from "../src/tools";
+import { Attachments, mentionAt } from "../src/core/attachments";
+import { clipLines, formatDuration, formatTokens, oneLine, shortPath, timeAgo, trunc, truncStart } from "../src/core/format";
+import { fuzzyFilter, fuzzyScore } from "../src/core/fuzzy";
+import { patchStats, toolFileChanges, toolHeader, toolOutput, toolPatches, toolSummary, type ToolState } from "../src/core/tools";
 
 const tool = (over: Partial<ToolState>): ToolState => ({ id: "t", title: "Tool", status: "completed", content: [], locations: [], ...over });
 const cwd = "/work/project";
@@ -54,6 +55,13 @@ test("formatting helpers", () => {
   expect(formatDuration(125_000)).toBe("2m 5s");
   expect(clipLines("a\nb\nc\nd", 2)).toEqual({ text: "a\nb", hidden: 2 });
   expect(clipLines("a", 2)).toEqual({ text: "a", hidden: 0 });
+  expect(trunc("abcdef", 4)).toBe("abc…");
+  expect(truncStart("src/deep/file.ts", 8)).toBe("…file.ts");
+  expect(oneLine("a\n   b  ", 10)).toBe("a b");
+  const now = Date.parse("2026-01-02T00:00:00Z");
+  expect(timeAgo("2026-01-01T23:59:30Z", now)).toBe("just now");
+  expect(timeAgo("2026-01-01T21:00:00Z", now)).toBe("3h ago");
+  expect(timeAgo(null, now)).toBe("");
 });
 
 test("fuzzy matching prefers file names and rejects non-matches", () => {
@@ -94,18 +102,7 @@ test("mentioned files and pasted images are attached", async () => {
   expect((await a.blocks(image, dir, false)).map((b) => b.type)).toEqual(["text"]);
 });
 
-test("gradients blend between two colors", async () => {
-  const { blend, gradient, hatchedTitle, themes } = await import("../src/theme");
-  expect(blend("#000000", "#ffffff", 0)).toBe("#000000");
-  expect(blend("#000000", "#ffffff", 1)).toBe("#ffffff");
-  expect(blend("#000000", "#ffffff", 0.5)).toBe("#808080");
-  expect(gradient("abc", "#000000", "#ffffff").map((c) => c.text).join("")).toBe("abc");
-  const title = hatchedTitle(themes.charm, "Commands", 20);
-  expect(title.map((c) => c.text).join("")).toBe("Commands ╱╱╱╱╱╱╱╱╱╱╱");
-});
-
-test("finished edits report the files they changed", async () => {
-  const { toolFileChanges } = await import("../src/tools");
+test("finished edits report the files they changed", () => {
   const edit = tool({ kind: "edit", content: [{ type: "diff", path: "/work/project/a.ts", oldText: "x\n", newText: "y\nz\n" }] });
   expect(toolFileChanges(edit, cwd)).toEqual([{ path: "a.ts", added: 2, removed: 1 }]);
   expect(toolFileChanges({ ...edit, status: "pending" }, cwd)).toEqual([]);

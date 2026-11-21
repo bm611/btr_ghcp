@@ -1,6 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { createTwoFilesPatch } from "diff";
-import { isAbsolute, relative } from "node:path";
+import { formatBytes, oneLine, plural, shortPath } from "./format";
 
 /** What the transcript keeps of a tool call. */
 export type ToolState = {
@@ -14,13 +14,6 @@ export type ToolState = {
   locations: acp.ToolCallLocation[];
 };
 
-export function shortPath(cwd: string, path: string) {
-  if (!isAbsolute(path)) return path;
-  const rel = relative(cwd, path);
-  if (!rel) return ".";
-  return rel.startsWith("..") ? path.replace(process.env.HOME ?? "\0", "~") : rel;
-}
-
 function field(input: unknown, ...names: string[]): string | undefined {
   if (!input || typeof input !== "object") return undefined;
   for (const n of names) {
@@ -29,11 +22,6 @@ function field(input: unknown, ...names: string[]): string | undefined {
   }
   return undefined;
 }
-
-const oneLine = (s: string, max = 120) => {
-  const flat = s.replace(/\s*\n\s*/g, " ").trim();
-  return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
-};
 
 /** The header of a tool call: a verb such as `Read` and what it acts on. */
 export function toolHeader(tool: ToolState, cwd: string): { name: string; arg: string } {
@@ -103,8 +91,10 @@ export function toolPatches(tool: { content?: acp.ToolCallContent[] | null; rawI
   return typeof raw === "string" && raw.trim() ? [raw.replace(/^\n+/, "")] : [];
 }
 
+export type FileChange = { path: string; added: number; removed: number };
+
 /** The files a finished edit changed, with line counts. */
-export function toolFileChanges(tool: ToolState, cwd: string): { path: string; added: number; removed: number }[] {
+export function toolFileChanges(tool: ToolState, cwd: string): FileChange[] {
   if (tool.status !== "completed") return [];
   return toolPatches(tool, cwd).map((p) => ({
     path: /^\+\+\+ (?:b\/)?(.+?)\s*$/m.exec(p)?.[1] ?? toolHeader(tool, cwd).arg,
@@ -121,8 +111,6 @@ export function patchStats(patch: string) {
   }
   return { added, removed };
 }
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** One line that sums up a finished tool call, such as "Read 120 lines". Empty when the output itself is the summary. */
 export function toolSummary(tool: ToolState, cwd: string): string {
@@ -141,31 +129,4 @@ export function toolSummary(tool: ToolState, cwd: string): string {
   if (name === "Fetch") return `Received ${formatBytes(out.length)}`;
   if (!out) return "Done";
   return "";
-}
-
-export function formatBytes(n: number) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-export function formatTokens(n: number) {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-}
-
-export function formatDuration(ms: number) {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-/** The first `max` lines of `text` and how many were left out. */
-export function clipLines(text: string, max: number): { text: string; hidden: number } {
-  const lines = text.split("\n");
-  if (lines.length <= max) return { text, hidden: 0 };
-  return { text: lines.slice(0, max).join("\n"), hidden: lines.length - max };
 }

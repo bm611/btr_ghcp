@@ -1,60 +1,50 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import {
   BoxRenderable,
+  type CliRenderer,
   DiffRenderable,
   MarkdownRenderable,
-  type MarkdownOptions,
-  RGBA,
-  type CliRenderer,
   type Renderable,
   type ScrollBoxRenderable,
-  StyledText,
+  type StyledText,
   type SyntaxStyle,
   type TextChunk,
   TextRenderable,
-  bg,
   bold,
   fg,
   italic,
-  strikethrough,
 } from "@opentui/core";
-import { G, type GlowPalette, type MarkdownStyle, type Theme } from "./theme";
-import { clipLines, formatDuration, patchStats, toolHeader, toolOutput, toolPatches, toolSummary, type ToolState } from "./tools";
+import { clipLines, formatDuration } from "../core/format";
+import { patchStats, toolHeader, toolOutput, toolPatches, toolSummary, type ToolState } from "../core/tools";
+import { type GlowPalette, type MarkdownStyle, glowBullets, glowHooks } from "./glow";
+import { styled, todoLine, toneColor, toneGlyph, type Tone } from "./text";
+import { G, type Theme } from "./theme";
 
-/** The verbs fx writes before a tool's target: present tense while it runs, past once done. */
-const VERBS: Record<string, [string, string]> = {
-  Bash: ["Running", "Ran"],
-  Read: ["Reading", "Read"],
-  Search: ["Searching", "Searched"],
-  Update: ["Editing", "Edited"],
-  Write: ["Writing", "Wrote"],
-  Delete: ["Deleting", "Deleted"],
-  Move: ["Moving", "Moved"],
-  Fetch: ["Fetching", "Fetched"],
-  Think: ["Thinking", "Thought"],
-};
-
-/** One single-width icon per kind of tool, for a folded turn's summary. */
-const KIND_ICONS: Record<string, string> = {
-  Read: G.read,
-  Search: G.search,
-  Bash: G.shell,
-  Update: G.edit,
-  Write: G.write,
-  Delete: G.del,
-  Move: G.move,
-  Fetch: G.fetch,
-  Think: G.thought,
-  Other: G.tools,
+/**
+ * How each kind of tool call reads (by the name `toolHeader` gives it): the verbs fx writes
+ * before its target, present tense while it runs and past once done, and the one-cell icon
+ * a folded turn counts it under. Calls with other names count under the gear.
+ */
+const TOOLS: Record<string, { verbs: [string, string]; icon: string }> = {
+  Bash: { verbs: ["Running", "Ran"], icon: G.shell },
+  Read: { verbs: ["Reading", "Read"], icon: G.read },
+  Search: { verbs: ["Searching", "Searched"], icon: G.search },
+  Update: { verbs: ["Editing", "Edited"], icon: G.edit },
+  Write: { verbs: ["Writing", "Wrote"], icon: G.write },
+  Delete: { verbs: ["Deleting", "Deleted"], icon: G.del },
+  Move: { verbs: ["Moving", "Moved"], icon: G.move },
+  Fetch: { verbs: ["Fetching", "Fetched"], icon: G.fetch },
+  Think: { verbs: ["Thinking", "Thought"], icon: G.thought },
 };
 
 export function toolVerb(name: string, status: ToolState["status"]): string {
-  const v = VERBS[name];
+  const v = TOOLS[name]?.verbs;
   if (!v) return name;
   return status === "completed" || status === "failed" ? v[1] : v[0];
 }
 
-export type Tone = "dim" | "error" | "warning" | "success" | "info" | "text";
+/** What a prompt was typed as: a message to the agent, a shell command (!), or a note (#). */
+export type InputMode = "prompt" | "bash" | "memory";
 
 export type Item =
   /** The welcome line: a name, then dim details. */
@@ -62,7 +52,7 @@ export type Item =
   | {
       type: "user";
       text: string;
-      mode: "prompt" | "bash" | "memory";
+      mode: InputMode;
       /** What a shell command printed, or where a note was saved, shown right under it. */
       result?: { text: string; tone?: Tone; clip?: boolean };
     }
@@ -107,31 +97,6 @@ const VERBOSE_CLIP = 400;
 /** Lines of a read, search or fetch result shown in details mode, under its summary. */
 const PREVIEW = 12;
 
-const chunk = (text: string): TextChunk => ({ __isChunk: true, text });
-export const styled = (...parts: (TextChunk | string)[]) => new StyledText(parts.map((p) => (typeof p === "string" ? chunk(p) : p)));
-
-export function toneColor(th: Theme, tone: Tone | undefined) {
-  switch (tone) {
-    case "error":
-      return th.error;
-    case "warning":
-      return th.warning;
-    case "success":
-      return th.success;
-    case "info":
-      return th.info;
-    case "text":
-      return th.fg;
-    default:
-      return th.fgMuted;
-  }
-}
-
-/** A small colored label such as " ERROR ". */
-export function badge(th: Theme, label: string, color: string): TextChunk {
-  return bold(bg(color)(fg(th.bg)(` ${label} `)));
-}
-
 export class Transcript {
   readonly entries: Entry[] = [];
   private blinkOn = true;
@@ -150,6 +115,11 @@ export class Transcript {
     this.entries.push(entry);
     this.box.add(entry.node);
     return entry;
+  }
+
+  /** A one-line message in the transcript. */
+  note(text: string, tone: Tone = "dim") {
+    return this.add({ type: "note", text, tone });
   }
 
   /** Whether an entry is folded away inside its group. */
@@ -215,14 +185,6 @@ export class Transcript {
   finishReply(entry: Entry<Extract<Item, { type: "assistant" }>>) {
     entry.item.streaming = false;
     if (entry.md) entry.md.streaming = false;
-  }
-
-  remove(entry: Entry) {
-    const i = this.entries.indexOf(entry);
-    if (i < 0) return;
-    this.entries.splice(i, 1);
-    this.box.remove(entry.node);
-    entry.node.destroyRecursively();
   }
 
   clear() {
@@ -356,9 +318,8 @@ export class Transcript {
         const tools = item.members.flatMap((m) => (m.item.type === "tool" ? [m.item.tool] : []));
         const counts = new Map<string, number>();
         for (const t of tools) {
-          const name = toolHeader(t, this.ctx.cwd).name;
-          const kind = KIND_ICONS[name] ? name : "Other";
-          counts.set(kind, (counts.get(kind) ?? 0) + 1);
+          const icon = TOOLS[toolHeader(t, this.ctx.cwd).name]?.icon ?? G.tools;
+          counts.set(icon, (counts.get(icon) ?? 0) + 1);
         }
         const failed = tools.filter((t) => t.status === "failed").length;
         const thought = item.members.reduce((n, m) => n + (m.item.type === "thought" ? (m.item.ms ?? 0) : 0), 0);
@@ -371,7 +332,7 @@ export class Transcript {
         };
         if (tools.length) stat(G.tools, `${tools.length} tool call${tools.length === 1 ? "" : "s"}`, th.fg);
         // Most used first; a single kind is already said by the total.
-        if (counts.size > 1) for (const [kind, n] of [...counts].sort((a, b) => b[1] - a[1])) stat(KIND_ICONS[kind]!, String(n));
+        if (counts.size > 1) for (const [icon, n] of [...counts].sort((a, b) => b[1] - a[1])) stat(icon, String(n));
         if (failed) stat(G.fail, String(failed));
         if (hasThought) stat(G.thought, thought >= 1000 ? formatDuration(thought) : "thought");
         if (!this.ctx.verbose()) chunks.push(fg(th.fgFaint)(open ? "  click to fold" : "  click or ctrl+d to expand"));
@@ -506,63 +467,5 @@ export class Transcript {
         return box;
       }
     }
-  }
-}
-
-/** One to-do, as the transcript, the sidebar and the pinned list draw it. */
-export function todoLine(th: Theme, e: acp.PlanEntry): StyledText {
-  if (e.status === "completed") return styled(fg(th.fgMuted)(G.check + " "), strikethrough(fg(th.fgMuted)(e.content)));
-  if (e.status === "in_progress") return styled(fg(th.fg)(G.arrow + " "), bold(fg(th.fg)(e.content)));
-  return styled(fg(th.fgFaint)(G.todo + " "), fg(th.fgSubtle)(e.content));
-}
-
-/** The mark fx puts before a notice: ✗ for errors, ⚠ for warnings, ✓ for success. */
-export function toneGlyph(tone: Tone | undefined): string {
-  return tone === "error" ? G.fail + " " : tone === "warning" ? G.warn + " " : tone === "success" ? G.check + " " : "";
-}
-
-/**
- * The parts of glow's look that styles alone cannot give: headings keep their
- * `##` markers (a level-1 heading is a colored band), code blocks are indented,
- * and inline code is padded on a background.
- */
-function glowHooks(renderer: CliRenderer, g: GlowPalette): Pick<MarkdownOptions, "renderBlock" | "inlineHook"> {
-  const codeFg = RGBA.fromHex(g.codeFg);
-  const codeBg = RGBA.fromHex(g.codeBg);
-  return {
-    renderBlock(block, context) {
-      if (block.kind === "heading") {
-        const level = block.level ?? 1;
-        const content =
-          level === 1
-            ? styled(bold(bg(g.h1Bg)(fg(g.h1Fg)(` ${block.text} `))))
-            : level === 6
-              ? styled(fg(g.h6)(`${"#".repeat(level)} ${block.text}`))
-              : styled(bold(fg(g.heading)(`${"#".repeat(level)} ${block.text}`)));
-        return new TextRenderable(renderer, { content, flexShrink: 0, wrapMode: "word" });
-      }
-      if (block.kind === "code") {
-        const code = context.defaultRender();
-        if (code) code.marginLeft = 2;
-        return code;
-      }
-      return undefined;
-    },
-    inlineHook: (spans) => spans.map((sp) => (sp.code ? { ...sp, text: ` ${sp.text} `, fg: codeFg, bg: codeBg } : sp)),
-  };
-}
-
-/**
- * Draws list bullets as glow does, "•" in place of "-". OpenTUI fixes the marker text,
- * so this rewrites the markers it built; it runs again after every change of content,
- * since a change to a list draws its markers anew.
- */
-function glowBullets(node: Renderable) {
-  for (const child of node.getChildren() as Renderable[]) {
-    if (child instanceof TextRenderable && child.id.endsWith("-marker")) {
-      const chunks = child.content.chunks;
-      const first = chunks[0];
-      if (first && first.text.startsWith("-")) child.content = new StyledText([{ ...first, text: "•" + first.text.slice(1) }, ...chunks.slice(1)]);
-    } else glowBullets(child);
   }
 }

@@ -1,12 +1,14 @@
 import * as acp from "@agentclientprotocol/sdk";
+import { VERSION } from "../version";
 
+/** What the client does with what the agent sends it. */
 export type AgentHandlers = {
   onUpdate: (update: acp.SessionUpdate) => void;
   onPermission: (req: acp.RequestPermissionRequest) => Promise<acp.RequestPermissionOutcome>;
 };
 
+/** The agent's stderr goes here: anything it printed to the terminal would corrupt the interface. */
 export const AGENT_LOG = `${process.env.TMPDIR ?? "/tmp"}/btr_ghcp-agent.log`;
-export const VERSION = "0.2.0";
 
 export type Agent = Awaited<ReturnType<typeof startAgent>>;
 
@@ -145,53 +147,4 @@ export async function startAgent(cwd: string, handlers: AgentHandlers) {
       proc.kill();
     },
   };
-}
-
-const COPILOT_HOME = process.env.COPILOT_HOME ?? `${process.env.HOME}/.copilot`;
-
-/**
- * The model Copilot's "auto" routing picked for this session's latest turn. ACP only ever
- * reports "auto", so this reads the event log Copilot keeps for each session; null when
- * there is none (another agent, or no turn routed yet). Only the log's tail is read.
- */
-export async function routedModel(sessionId: string): Promise<{ id: string; name: string; reason?: string } | null> {
-  if (!sessionId || /[^\w-]/.test(sessionId)) return null;
-  const file = Bun.file(`${COPILOT_HOME}/session-state/${sessionId}/events.jsonl`);
-  const text = await file
-    .slice(Math.max(0, file.size - 512 * 1024))
-    .text()
-    .catch(() => "");
-  let id = "";
-  let reason: string | undefined;
-  const names = new Map<string, string>();
-  for (const line of text.split("\n")) {
-    if (!line.includes('"session.auto_mode_resolved"') && !line.includes('"session.usage_record"')) continue;
-    try {
-      const e = JSON.parse(line);
-      if (e.type === "session.auto_mode_resolved" && e.data?.chosenModel) {
-        id = e.data.chosenModel;
-        reason = e.data.selectionReason;
-      } else if (e.data?.usage?.model && e.data.usage.modelDisplayName) names.set(e.data.usage.model, e.data.usage.modelDisplayName);
-    } catch {
-      // The first line of the tail is usually cut in half.
-    }
-  }
-  return id ? { id, name: names.get(id) ?? id.replace(/-/g, " "), reason } : null;
-}
-
-/** The select-type config option in a category, such as "mode" or "model". */
-export function selectOption(options: acp.SessionConfigOption[], category: string) {
-  const o = options.find((o) => o.category === category && o.type === "select");
-  return o?.type === "select" ? o : undefined;
-}
-
-/** A select option's choices, flattened out of their groups and without duplicates. */
-export function choices(o: acp.SessionConfigSelect) {
-  const flat = o.options.flatMap((x) => ("group" in x ? x.options : [x]));
-  return flat.filter((x, i) => flat.findIndex((y) => y.value === x.value) === i);
-}
-
-export function currentName(options: acp.SessionConfigOption[], category: string) {
-  const o = selectOption(options, category);
-  return o ? (choices(o).find((c) => c.value === o.currentValue)?.name ?? String(o.currentValue)) : "";
 }
