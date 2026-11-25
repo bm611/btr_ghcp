@@ -6,6 +6,7 @@ import type { Transcript } from "../ui/transcript";
 import type { Chrome } from "./chrome";
 import type { Commands } from "./commands";
 import type { Conversation } from "./conversation";
+import type { Dashboard } from "./dashboard";
 import type { History } from "./history";
 import type { Look } from "./look";
 import type { Modes } from "./modes";
@@ -35,6 +36,8 @@ export type App = {
   menus: Menus;
   /** The status line, sidebar and panels around the conversation. */
   chrome: Chrome;
+  /** The start page shown while the session is empty. */
+  dashboard: Dashboard;
   /** Session updates, turns and the message queue. */
   conversation: Conversation;
   /** The agent's model, mode and permission options. */

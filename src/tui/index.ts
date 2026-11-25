@@ -9,6 +9,7 @@ import type { App } from "./app";
 import { createChrome } from "./chrome";
 import { createCommands } from "./commands";
 import { createConversation } from "./conversation";
+import { createDashboard } from "./dashboard";
 import { History } from "./history";
 import { bindKeys } from "./keys";
 import { Look } from "./look";
@@ -49,6 +50,7 @@ export async function runTui(opts: TuiOptions): Promise<App> {
     verbose: () => app.chrome.verbose,
     busy: () => app.conversation.busy,
     cwd,
+    onEntries: () => app.dashboard?.sync(),
     onCopy: (text) => {
       void app.commands.copy(text).then((ok) => app.chrome.flash(ok ? "Copied reply" : "Could not reach the clipboard", ok ? "success" : "error", 1400));
     },
@@ -67,6 +69,7 @@ export async function runTui(opts: TuiOptions): Promise<App> {
   );
   app.chrome = createChrome(app);
   app.conversation = createConversation(app);
+  app.dashboard = createDashboard(app);
   app.options = createOptions(app);
   app.prompt = createPrompt(app);
   app.modes = createModes(app);
@@ -130,6 +133,7 @@ export async function runTui(opts: TuiOptions): Promise<App> {
   app.conversation.refreshSplash();
   app.chrome.layout();
   app.chrome.drawStatus();
+  void app.dashboard.refresh();
   if (opts.prompt) {
     history.add(opts.prompt);
     void app.conversation.send(opts.prompt);

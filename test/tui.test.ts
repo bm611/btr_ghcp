@@ -50,11 +50,16 @@ async function submit(text: string) {
 }
 
 test(
-  "starts with the welcome line and the status line",
+  "starts on the dashboard: actions, recent sessions and the status line",
   async () => {
-    const screen = await screenUntil((s) => s.includes("btr v") && s.includes("ask · auto") && !s.includes("connecting"));
-    expect(screen).toContain("/ for commands");
+    const screen = await screenUntil((s) => s.includes("╚═════╝") && s.includes("Recent") && s.includes("ask · auto") && !s.includes("connecting"));
+    expect(screen).toContain("Resume session");
+    expect(screen).toMatch(/Switch model[\s·]+ctrl\+l/);
+    expect(screen).toContain("Fix the flaky login test");
     expect(screen).toContain("permissions: ask");
+    // The start page has the window to itself.
+    expect(screen).not.toContain("Modified Files");
+    expect(app.dashboard.shown).toBe(true);
   },
   TIMEOUT,
 );
@@ -65,6 +70,8 @@ test(
     await submit("quick");
     const screen = await screenUntil((s) => s.includes("Worked for"));
     expect(screen).toContain("┃ quick");
+    expect(screen).not.toContain("╚═════╝");
+    expect(app.dashboard.shown).toBe(false);
     expect(screen).toContain("Done. That was the quick one.");
   },
   TIMEOUT,

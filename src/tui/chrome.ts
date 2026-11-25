@@ -31,7 +31,8 @@ export function createChrome(app: App) {
   let spinTick = 0;
   let hasUnread = false;
 
-  const sidebarShown = () => settings.sidebar && renderer.width >= SIDEBAR_MIN_WINDOW;
+  // The start page has the window to itself.
+  const sidebarShown = () => settings.sidebar && renderer.width >= SIDEBAR_MIN_WINDOW && !app.dashboard?.shown;
   const sidebarWidth = () => Math.min(38, Math.max(28, Math.floor(renderer.width * 0.28)));
 
   const isScrolledUp = () => {
@@ -123,6 +124,7 @@ export function createChrome(app: App) {
     drawQueue();
     drawHelp();
     drawStatus();
+    app.dashboard?.draw();
   }
 
   function modeColor(mode: string) {

@@ -33,6 +33,8 @@ Set `BTR_AGENT="gemini --experimental-acp"` to use another agent. Agent stderr i
 
 ## Interface
 
+A new or cleared session opens on a dashboard: common actions with their shortcuts, the latest sessions for this directory, and the folder, git branch, model, and mode. Click a row to run it or resume that session. It gives way to the conversation as soon as you send something, and the sidebar stays hidden until then.
+
 | Key | Action |
 | --- | --- |
 | `Enter` | Send a message, or queue it while the agent works |

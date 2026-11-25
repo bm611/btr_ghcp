@@ -426,6 +426,7 @@ export function createConversation(app: App) {
     await app.agent.newSession();
     reset();
     refreshSplash();
+    void app.dashboard.refresh();
     app.chrome.flash("New session", "success", 1500);
   }
 

@@ -7,7 +7,7 @@ export const SIDEBAR_WIDTH = 36;
 export type View = ReturnType<typeof createView>;
 
 /**
- * The layout. A column holds, top to bottom: the conversation, the jump-to-bottom pill,
+ * The layout. A column holds, top to bottom: the start page (while the session is empty), the conversation, the jump-to-bottom pill,
  * the pinned to-dos, the working line, queued messages, attachments, completions, the
  * prompt, the shortcut panel and the status line; the sidebar sits beside it. This only
  * builds the nodes: the other modules fill them in.
@@ -23,6 +23,19 @@ export function createView(renderer: CliRenderer) {
 
   const main = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexShrink: 1 });
   body.add(main);
+
+  // The start page (dashboard.ts): it fills the room above the prompt while the session is empty.
+  const dashboard = new BoxRenderable(renderer, {
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    visible: false,
+  });
+  main.add(dashboard);
 
   // The conversation takes only the rows it needs, so the prompt sits right under it, as
   // in fx; once it fills the window it shrinks to fit and scrolls, and the prompt stays at the bottom.
@@ -141,11 +154,14 @@ export function createView(renderer: CliRenderer) {
   status.add(statusText);
   status.add(statusContext);
   main.add(status);
-  // Takes up whatever room is left below the prompt.
-  main.add(new BoxRenderable(renderer, { flexGrow: 1, flexShrink: 1, minHeight: 0 }));
+  // Takes up whatever room is left below the prompt; the dashboard takes it instead.
+  const filler = new BoxRenderable(renderer, { flexGrow: 1, flexShrink: 1, minHeight: 0 });
+  main.add(filler);
 
   return {
     root,
+    dashboard,
+    filler,
     scroll,
     list,
     scrollJump,

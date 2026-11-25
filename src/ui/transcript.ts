@@ -98,6 +98,8 @@ export type TranscriptContext = {
   cwd: string;
   /** Called when the user clicks a reply's copy action. */
   onCopy?: (text: string) => void;
+  /** Called after an entry is added or the transcript is cleared. */
+  onEntries?: () => void;
 };
 
 /** Lines of tool or command output shown before "… +N lines". */
@@ -137,6 +139,7 @@ export class Transcript {
     entry.node = this.build(entry);
     this.entries.push(entry);
     this.box.add(entry.node);
+    this.ctx.onEntries?.();
     return entry;
   }
 
@@ -250,6 +253,7 @@ export class Transcript {
       this.box.remove(e.node);
       e.node.destroyRecursively();
     }
+    this.ctx.onEntries?.();
   }
 
   /** Draws everything again: after a theme change or a verbosity toggle. */
