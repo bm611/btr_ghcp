@@ -50,7 +50,7 @@ export async function runTui(opts: TuiOptions): Promise<App> {
     verbose: () => app.chrome.verbose,
     busy: () => app.conversation.busy,
     cwd,
-    onEntries: () => app.dashboard?.sync(),
+    onEntries: () => app.dashboard.sync(),
     onCopy: (text) => {
       void app.commands.copy(text).then((ok) => app.chrome.flash(ok ? "Copied reply" : "Could not reach the clipboard", ok ? "success" : "error", 1400));
     },
@@ -130,10 +130,8 @@ export async function runTui(opts: TuiOptions): Promise<App> {
   if (opts.model && !(await app.options.setByName("model", opts.model))) app.chrome.flash(`No model matches "${opts.model}"`, "warning");
   if (opts.mode && !(await app.options.setByName("mode", opts.mode))) app.chrome.flash(`No mode matches "${opts.mode}"`, "warning");
   app.conversation.ready();
-  app.conversation.refreshSplash();
   app.chrome.layout();
   app.chrome.drawStatus();
-  void app.dashboard.refresh();
   if (opts.prompt) {
     history.add(opts.prompt);
     void app.conversation.send(opts.prompt);

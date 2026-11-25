@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { COPILOT_HOME } from "../agent/copilot";
 import { errorText, tildify, trunc } from "../core/format";
 import type { MenuOption } from "../ui/menu";
 import { G } from "../ui/theme";
@@ -74,7 +74,7 @@ export function createModes(app: App) {
     const targets: MenuOption[] = [
       { label: "Project instructions", value: join(cwd, "AGENTS.md"), hint: "AGENTS.md" },
       { label: "Project Copilot instructions", value: join(cwd, ".github", "copilot-instructions.md"), hint: ".github/copilot-instructions.md" },
-      { label: "User instructions", value: join(homedir(), ".copilot", "copilot-instructions.md"), hint: "~/.copilot/…" },
+      { label: "User instructions", value: join(COPILOT_HOME, "copilot-instructions.md"), hint: `${tildify(COPILOT_HOME)}/…` },
     ];
     const file = await app.menus.open({ title: "Save Note", question: `Where should "${trunc(memo, 50)}" be saved?`, options: targets });
     if (!file) return;

@@ -12,6 +12,18 @@ export const truncStart = (s: string, n: number) => (s.length > n ? ELLIPSIS + s
 /** `s` on one line, its whitespace runs collapsed, cut to `max`. */
 export const oneLine = (s: string, max = 120) => trunc(s.replace(/\s*\n\s*/g, " ").trim(), max);
 
+/** The first line of `s`, cut to `n` characters: a session title as a label. */
+export const firstLine = (s: string, n: number) => trunc(s.split("\n")[0]!, n);
+
+/** The first sentence of `s`, without its full stop, cut to `n`: a command's description as a hint. */
+export const firstSentence = (s: string, n: number) => trunc(s.split(/\.\s/)[0]!.replace(/\.$/, ""), n);
+
+/** An amount the agent reported, such as "0.0123 USD". */
+export const formatCost = (cost: { amount: number; currency: string }) => `${cost.amount.toFixed(4)} ${cost.currency}`;
+
+/** A session's title, or its id when it has none, as a one-line label. */
+export const sessionLabel = (s: { title?: string | null; sessionId: string }, n: number) => firstLine(s.title ?? s.sessionId, n);
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** `path` with the home directory written as `~`. */

@@ -12,7 +12,7 @@ import {
   fg,
 } from "@opentui/core";
 import { fuzzyFilter, fuzzyMatch } from "../core/fuzzy";
-import { hatchedTitle, highlightMatches, styled } from "./text";
+import { clearChildren, hatchedTitle, highlightMatches, styled } from "./text";
 import { G, type Theme } from "./theme";
 
 export type MenuOption = {
@@ -220,6 +220,11 @@ export class Menus {
     return !p.buttons;
   }
 
+  /** The room for content inside the box: its width less border and padding. */
+  private inner(p: Pending) {
+    return this.width(p) - (this.centered(p) ? 8 : 4);
+  }
+
   /** The box's outer width: the request's own, within the window; a docked panel spans it. */
   private width(p: Pending) {
     if (!this.centered(p)) return Math.max(30, this.renderer.width);
@@ -264,10 +269,7 @@ export class Menus {
 
   private show(reset = true) {
     const p = this.queue[0];
-    for (const child of this.bodyContent.getChildren()) {
-      this.bodyContent.remove(child);
-      child.destroyRecursively();
-    }
+    clearChildren(this.bodyContent);
     this.bodyScrollable = false;
     if (!p) {
       this.overlay.visible = false;
@@ -292,15 +294,7 @@ export class Menus {
     this.box.width = centered ? this.width(p) : "auto";
     this.box.backgroundColor = th.bg;
     this.box.borderColor = centered ? th.fgFaint : th.separatorSubtle;
-    if (centered) {
-      this.box.paddingX = 3;
-      this.box.paddingTop = 1;
-      this.box.paddingBottom = 1;
-    } else {
-      this.box.paddingX = 2;
-      this.box.paddingTop = 1;
-      this.box.paddingBottom = 1;
-    }
+    this.box.paddingX = centered ? 3 : 2;
     const body = p.body?.() ?? [];
     for (const node of body) this.bodyContent.add(node);
     this.body.visible = body.length > 0;
@@ -318,10 +312,7 @@ export class Menus {
   }
 
   private drawTabs(p: Pending, th: Theme): number {
-    for (const c of this.tabRow.getChildren()) {
-      this.tabRow.remove(c);
-      c.destroyRecursively();
-    }
+    clearChildren(this.tabRow);
     if (!p.tabs?.length) {
       this.tabRow.visible = false;
       return 0;
@@ -359,7 +350,7 @@ export class Menus {
     const p = this.queue[0];
     if (!p) return;
     const th = this.theme();
-    const inner = this.width(p) - (this.centered(p) ? 8 : 4);
+    const inner = this.inner(p);
     const tabsWidth = this.drawTabs(p, th);
     const queueBadge = this.queue.length > 1 ? ` (1/${this.queue.length})` : "";
     const titleText = p.title + queueBadge;
@@ -370,7 +361,7 @@ export class Menus {
     // A search looks through every tab; the tabs only split the list while browsing.
     const searching = !!(p.filterable && this.filter);
     const pool = p.tabs?.length && !searching ? p.options.filter((o) => (o.tab ?? p.tabs![0]) === p.tabs![this.tab]) : p.options;
-    this.shown = p.filterable && this.filter ? fuzzyFilter(this.filter, pool, (o) => `${o.label} ${o.hint ?? ""}`, 300) : pool;
+    this.shown = searching ? fuzzyFilter(this.filter, pool, (o) => `${o.label} ${o.hint ?? ""}`, 300) : pool;
     this.selected = Math.max(0, Math.min(this.selected, this.shown.length - 1));
 
     this.filterRow.content = this.filter
@@ -422,7 +413,7 @@ export class Menus {
     const p = this.queue[0];
     if (!p) return;
     const th = this.theme();
-    const inner = this.width(p) - (this.centered(p) ? 8 : 4);
+    const inner = this.inner(p);
     const keys: [string, string][] = [];
     if (p.tabs && p.tabs.length > 1 && !this.filter) keys.push(["tab", "switch list"]);
     if (p.passthrough && this.filter) keys.push(["space", "add arguments"]);

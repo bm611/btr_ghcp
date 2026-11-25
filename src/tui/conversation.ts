@@ -1,6 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { AGENT_LOG } from "../agent/connection";
-import { errorText, formatDuration, shortPath, timeAgo, trunc } from "../core/format";
+import { errorText, firstLine, formatDuration, sessionLabel, shortPath, timeAgo } from "../core/format";
 import { type FileChange, type ToolState, toolFileChanges } from "../core/tools";
 import type { Tone } from "../ui/text";
 import { G } from "../ui/theme";
@@ -71,13 +71,6 @@ export function createConversation(app: App) {
 
   /** The welcome line, as fx prints it: "btr v0.2.0 · / for commands". */
   const splash = (): Extract<Item, { type: "splash" }> => ({ type: "splash", name: "btr", detail: `v${VERSION} · / for commands · ? for keys` });
-
-  function refreshSplash() {
-    const first = transcript.entries[0];
-    if (first?.item.type !== "splash") return;
-    Object.assign(first.item, splash());
-    transcript.update(first);
-  }
 
   /** Empties the transcript for a new or resumed session. */
   function reset() {
@@ -311,15 +304,9 @@ export function createConversation(app: App) {
       transcript.tick();
       // Calls the agent never finished stop blinking and read as abandoned.
       for (const e of tools.values()) if (e.item.tool.status === "pending" || e.item.tool.status === "in_progress") transcript.update(e);
-      if (!cancelled && !outcome) foldTurn(asked);
-      const replyText = (() => {
-        for (let i = transcript.entries.length - 1; i >= 0; i--) {
-          const e = transcript.entries[i]!;
-          if (e === asked) break;
-          if (e.item.type === "assistant" && e.item.text.trim()) return e.item.text;
-        }
-        return undefined;
-      })();
+      const reply = transcript.lastReplyEntry(asked);
+      if (!cancelled && !outcome && reply) foldTurn(asked, reply);
+      const replyText = reply?.item.text;
       if (cancelled) transcript.add({ type: "footer", text: `${G.stop} Cancelled · What should the agent do differently?`, tone: "text" });
       else
         transcript.add({
@@ -346,16 +333,9 @@ export function createConversation(app: App) {
    * Once a turn ends, its thinking, tool calls and in-between messages fold into one line,
    * so the reply that closes it stands on its own. Errors and warnings stay in view.
    */
-  function foldTurn(asked: Entry) {
+  function foldTurn(asked: Entry, reply: Entry) {
     const after = transcript.entries.slice(transcript.entries.indexOf(asked) + 1);
-    let last = -1;
-    for (let i = after.length - 1; i >= 0; i--) {
-      const it = after[i]!.item;
-      if (it.type === "assistant" && it.text.trim()) {
-        last = i;
-        break;
-      }
-    }
+    const last = after.indexOf(reply);
     if (last <= 0) return;
     const members = after.slice(0, last).filter((e) => !(e.item.type === "note" && (e.item.tone === "error" || e.item.tone === "warning")));
     if (members.some((e) => e.item.type === "tool" || e.item.type === "thought")) transcript.fold(members);
@@ -405,7 +385,7 @@ export function createConversation(app: App) {
       await agent.loadSession(id);
       endBlocks();
       sessionTitle ||= title;
-      note(`Resumed ${trunc((sessionTitle || id).split("\n")[0]!, 60)}`);
+      note(`Resumed ${firstLine(sessionTitle || id, 60)}`);
     } catch (err) {
       endBlocks();
       note(`Could not resume ${id}: ${errorText(err)}`, "error");
@@ -414,7 +394,6 @@ export function createConversation(app: App) {
       replaying = false;
       cur.plan = undefined;
       void app.options.refreshRouted();
-      refreshSplash();
       app.chrome.layout();
       app.chrome.setTitle();
     }
@@ -425,9 +404,14 @@ export function createConversation(app: App) {
     if (!app.agent) return;
     await app.agent.newSession();
     reset();
-    refreshSplash();
-    void app.dashboard.refresh();
     app.chrome.flash("New session", "success", 1500);
+  }
+
+  /** This directory's sessions other than the open one, latest first; none when the agent cannot resume. */
+  async function earlierSessions(): Promise<acp.SessionInfo[]> {
+    const agent = app.agent;
+    if (!agent?.capabilities.loadSession) return [];
+    return (await agent.listSessions().catch(() => [])).filter((s) => s.sessionId !== agent.sessionId);
   }
 
   /** Shows the session list; resolves false when nothing was loaded. */
@@ -436,11 +420,11 @@ export function createConversation(app: App) {
     if (!agent) return false;
     if (busy) return (chrome.flash("Wait for the turn to end, or press esc to interrupt it", "warning"), false);
     if (!agent.capabilities.loadSession) return (chrome.flash("This agent cannot resume sessions", "warning"), false);
-    const sessions = (await agent.listSessions().catch(() => [])).filter((s) => s.sessionId !== agent.sessionId);
+    const sessions = await earlierSessions();
     if (!sessions.length) return (chrome.flash("No earlier sessions for this directory"), false);
     const id = await app.menus.open({
       title: "Sessions",
-      options: sessions.map((s) => ({ label: (s.title ?? s.sessionId).split("\n")[0]!.slice(0, 80), value: s.sessionId, hint: timeAgo(s.updatedAt) })),
+      options: sessions.map((s) => ({ label: sessionLabel(s, 80), value: s.sessionId, hint: timeAgo(s.updatedAt) })),
       filterable: true,
       placeholder: "Search sessions",
       width: 90,
@@ -461,10 +445,10 @@ export function createConversation(app: App) {
     popQueue,
     interrupt,
     reset,
-    refreshSplash,
     loadSession,
     newSession,
     pickSession,
+    earlierSessions,
     shellContext,
     started,
     /** Whether the agent offers a slash command of this name. */

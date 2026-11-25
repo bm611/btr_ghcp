@@ -25,7 +25,6 @@ export type Theme = {
   bg: string;
   bgPanel: string;
   bgRaised: string;
-  bgOverlay: string;
   separator: string;
   separatorSubtle: string;
   success: string;
@@ -70,7 +69,6 @@ export const themes = {
     bg: "#000000",
     bgPanel: "#0d0d0d",
     bgRaised: "#2a2a2a",
-    bgOverlay: "#000000cc",
     separator: "#3a3a3a",
     separatorSubtle: "#262626",
     success: "#30a46c",
@@ -108,7 +106,6 @@ export const themes = {
     bg: "#ffffff",
     bgPanel: "#f7f7f7",
     bgRaised: "#e8e8e8",
-    bgOverlay: "#ffffffcc",
     separator: "#d0d0d0",
     separatorSubtle: "#e8e8e8",
     success: "#2b8a5a",
@@ -146,7 +143,6 @@ export const themes = {
     bg: "#201f26",
     bgPanel: "#262530",
     bgRaised: "#3a3943",
-    bgOverlay: "#201f26cc",
     separator: "#3a3943",
     separatorSubtle: "#2d2c35",
     success: "#12c78f",
@@ -184,7 +180,6 @@ export const themes = {
     bg: "#fffaf1",
     bgPanel: "#f5f3f3",
     bgRaised: "#dfdbdd",
-    bgOverlay: "#fffaf1cc",
     separator: "#dfdbdd",
     separatorSubtle: "#ece9e9",
     success: "#0a9c77",
@@ -224,14 +219,9 @@ export const G = {
   model: "◇",
   diamond: "◆",
   thick: "▌",
-  thin: "▏",
   rule: "─",
-  ruleThick: "━",
   ellipsis: "…",
   prompt: ">",
-  thought: "∴",
-  rail: "┃",
-  railThin: "│",
   fail: "✗",
   select: "›",
   stop: "▪",
@@ -241,20 +231,10 @@ export const G = {
   open: "▾",
   bullet: "•",
   middot: "·",
-  pipe: "│",
-  corner: "└",
-  // A folded turn's summary. Text-presentation symbols, one cell wide, in most fonts.
-  tools: "⚙",
-  read: "≡",
+  // Text-presentation symbols, one cell wide, in most fonts.
   search: "⌕",
-  shell: "$",
   edit: "✎",
-  write: "✚",
-  del: "⌫",
-  move: "⇢",
-  fetch: "⇣",
   down: "↓",
-  wrap: "↩",
 };
 
 export function syntaxStyleFor(th: Theme, scene: Parameters<typeof SyntaxStyle.fromStyles>[1]) {
