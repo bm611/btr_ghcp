@@ -49,6 +49,9 @@ export async function runTui(opts: TuiOptions): Promise<App> {
     verbose: () => app.chrome.verbose,
     busy: () => app.conversation.busy,
     cwd,
+    onCopy: (text) => {
+      void app.commands.copy(text).then((ok) => app.chrome.flash(ok ? "Copied reply" : "Could not reach the clipboard", ok ? "success" : "error", 1400));
+    },
   });
   app.menus = new Menus(
     renderer,
@@ -60,6 +63,7 @@ export async function runTui(opts: TuiOptions): Promise<App> {
       app.prompt.drawCompletions();
       app.chrome.drawStatus();
     },
+    () => settings.background,
   );
   app.chrome = createChrome(app);
   app.conversation = createConversation(app);

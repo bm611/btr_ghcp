@@ -2,10 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Attachments, mentionAt } from "../src/core/attachments";
+import { Attachments, mentionAt, slashAt } from "../src/core/attachments";
 import { clipLines, formatDuration, formatTokens, oneLine, shortPath, timeAgo, trunc, truncStart } from "../src/core/format";
-import { fuzzyFilter, fuzzyScore } from "../src/core/fuzzy";
-import { patchStats, toolFileChanges, toolHeader, toolOutput, toolPatches, toolSummary, type ToolState } from "../src/core/tools";
+import { fuzzyFilter, fuzzyMatch, fuzzyScore } from "../src/core/fuzzy";
+import { patchStats, toolFileChanges, toolHeader, toolMetrics, toolOutput, toolPatches, toolSummary, type ToolState } from "../src/core/tools";
 
 const tool = (over: Partial<ToolState>): ToolState => ({ id: "t", title: "Tool", status: "completed", content: [], locations: [], ...over });
 const cwd = "/work/project";
@@ -106,4 +106,35 @@ test("finished edits report the files they changed", () => {
   const edit = tool({ kind: "edit", content: [{ type: "diff", path: "/work/project/a.ts", oldText: "x\n", newText: "y\nz\n" }] });
   expect(toolFileChanges(edit, cwd)).toEqual([{ path: "a.ts", added: 2, removed: 1 }]);
   expect(toolFileChanges({ ...edit, status: "pending" }, cwd)).toEqual([]);
+});
+
+test("fuzzyMatch returns matched indices and slashAt finds command tokens", () => {
+  expect(fuzzyMatch("sm", "src/main.ts")?.indices).toEqual([0, 4]);
+  expect(fuzzyMatch("nope", "src/main.ts")).toBeNull();
+  expect(slashAt("/stat", 5)).toEqual({ start: 0, query: "stat" });
+  expect(slashAt("/model gpt", 6)).toBeNull();
+  expect(slashAt("hi /stat", 8)).toBeNull();
+});
+
+test("toolMetrics computes diff counts, lines, bytes and duration", () => {
+  const edit = tool({
+    kind: "edit",
+    startedAt: 1000,
+    endedAt: 2250,
+    content: [{ type: "diff", path: "/work/project/a.ts", oldText: "one\n", newText: "one\ntwo\n" }],
+  });
+  expect(toolMetrics(edit, cwd)).toEqual({ added: 1, removed: 0, lines: 0, bytes: 0, ms: 1250 });
+  const read = tool({ kind: "read", rawInput: { path: "/work/project/a.ts" }, rawOutput: { content: "a\nb\nc" } });
+  expect(toolMetrics(read, cwd)).toEqual({ added: 0, removed: 0, lines: 3, bytes: 5, ms: undefined });
+});
+
+test("Attachments.describe summarizes mentions, pastes and images", () => {
+  const a = new Attachments();
+  const paste = a.paste("1\n2\n3\n4\n5\n6");
+  const img = a.image(new Uint8Array([1, 2]), "image/png");
+  expect(a.describe(`check @src/a.ts ${paste} ${img}`)).toEqual({
+    mentions: ["src/a.ts"],
+    pastes: [{ id: 1, lines: 6 }],
+    images: [{ id: 1, mimeType: "image/png" }],
+  });
 });

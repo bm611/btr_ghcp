@@ -12,17 +12,18 @@ export const HELP_KEYS: [key: string, does: string][] = [
   ["ctrl+n", "new session"],
   ["ctrl+s", "sessions"],
   ["ctrl+l", "switch model"],
-  ["shift+tab", "cycle mode"],
-  ["ctrl+y", "yolo mode"],
+  ["shift+tab", "cycle agent mode"],
+  ["ctrl+y", "toggle tool permissions"],
   ["esc", "interrupt"],
   ["ctrl+d", "toggle details"],
   ["ctrl+b", "toggle sidebar"],
   ["ctrl+t", "pin to-dos"],
   ["ctrl+o", "open $EDITOR"],
   ["ctrl+r", "search history"],
+  ["ctrl+f", "search transcript"],
   ["ctrl+v", "paste image"],
 ];
-export const HELP_FOOTER = "ctrl+g to close · alt+s stash · ctrl+c twice to quit · pgup/pgdn scroll";
+export const HELP_FOOTER = "ctrl+g to close · alt+s stash · alt+↑/⌫ edit/drop queued · pgup/pgdn scroll · ctrl+c twice to quit";
 
 /** A key as bindings write it: "ctrl+n", "alt+s", "shift+tab". */
 export function chord(key: Pick<KeyEvent, "name" | "ctrl" | "meta" | "shift">) {
@@ -48,7 +49,7 @@ export function bindKeys(app: App) {
   }
 
   // Keys that are not a command's, or that do something else than their command does
-  // from the palette: shift+tab cycles modes where "Switch Mode" opens a list.
+  // from the palette: shift+tab cycles agent modes where "Switch Agent Mode" opens a list.
   const bindings = new Map<string, () => unknown>([
     ["ctrl+p", () => app.commands.openPalette()],
     ["shift+tab", () => app.options.cycleMode()],
@@ -126,13 +127,35 @@ export function bindKeys(app: App) {
       }
     }
 
+    if (key.meta && key.name === "up" && conversation.queue.length && !prompt.completing) {
+      key.preventDefault();
+      return prompt.editQueued();
+    }
+    if (key.meta && key.name === "backspace" && conversation.queue.length) {
+      key.preventDefault();
+      return prompt.dropQueued();
+    }
+
     if (key.name === "pageup" || key.name === "pagedown") {
       key.preventDefault();
+      if (key.meta) {
+        const turns = app.transcript.entries.filter((e) => e.item.type === "user");
+        if (!turns.length) return;
+        const viewTop = view.scroll.scrollTop;
+        const target =
+          key.name === "pageup"
+            ? [...turns].reverse().find((e) => e.node.y < viewTop - 1) ?? turns[0]
+            : turns.find((e) => e.node.y > viewTop + 2) ?? turns.at(-1);
+        if (target) app.transcript.scrollToEntry(target);
+        return;
+      }
       return view.scroll.scrollBy(key.name === "pageup" ? -0.5 : 0.5, "viewport");
     }
     if (key.name === "end" && key.ctrl) {
       key.preventDefault();
-      return view.scroll.scrollTo(Infinity);
+      view.scroll.scrollTo(Infinity);
+      chrome.drawScrollJump();
+      return;
     }
 
     const bound = bindings.get(chord(key));

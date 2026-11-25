@@ -67,31 +67,31 @@ export function createOptions(app: App) {
 
   async function pick(category: "model" | "mode") {
     const o = option(category);
-    if (!o) return app.chrome.flash(`This agent has no ${category} option`, "warning");
+    if (!o) return app.chrome.flash(category === "mode" ? "This agent has no agent mode option" : "This agent has no model option", "warning");
     const list = choices(o);
     const value = await app.menus.open({
-      title: category === "model" ? "Switch Model" : "Switch Mode",
+      title: category === "model" ? "Switch Model" : "Switch Agent Mode",
       options: list.map((c) => ({ label: c.name, value: c.value, hint: c.value === o.currentValue ? G.check : undefined })),
       initial: list.findIndex((c) => c.value === o.currentValue),
       filterable: true,
-      placeholder: category === "model" ? "Choose a model" : "Choose a mode",
+      placeholder: category === "model" ? "Choose a model" : "Choose an agent mode",
     });
     if (!value) return;
     await set(category, value);
-    app.chrome.flash(`${category === "model" ? "Model" : "Mode"}: ${nameOf(category)}`, "success");
+    app.chrome.flash(`${category === "model" ? "Model" : "Agent mode"}: ${nameOf(category)}`, "success");
   }
 
   async function toggleYolo() {
     const o = option("permissions");
-    if (!o) return app.chrome.flash("This agent has no allow-all option", "warning");
+    if (!o) return app.chrome.flash("This agent has no tool permission option", "warning");
     const pair = onOff(o);
     if (!pair) {
-      const value = await app.menus.open({ title: o.name, options: choices(o).map((c) => ({ label: c.name, value: c.value })) });
+      const value = await app.menus.open({ title: "Tool Permissions", options: choices(o).map((c) => ({ label: c.name, value: c.value })) });
       if (value) await set("permissions", value);
       return;
     }
     await set("permissions", yolo() ? pair.off.value : pair.on.value);
-    app.chrome.flash(yolo() ? "Yolo mode on: tools run without asking" : "Yolo mode off: tools ask first", yolo() ? "warning" : "info");
+    app.chrome.flash(yolo() ? "Full tool access: tools run without asking" : "Ask for permission: tools ask first", yolo() ? "warning" : "info");
   }
 
   return {

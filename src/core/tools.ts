@@ -12,6 +12,9 @@ export type ToolState = {
   rawOutput?: unknown;
   content: acp.ToolCallContent[];
   locations: acp.ToolCallLocation[];
+  /** Timestamps (epoch ms) for elapsed duration display. */
+  startedAt?: number;
+  endedAt?: number;
 };
 
 function field(input: unknown, ...names: string[]): string | undefined {
@@ -129,4 +132,16 @@ export function toolSummary(tool: ToolState, cwd: string): string {
   if (name === "Fetch") return `Received ${formatBytes(out.length)}`;
   if (!out) return "Done";
   return "";
+}
+
+/** Compact metrics for a tool call header (diff lines, output lines/bytes, duration). */
+export function toolMetrics(tool: ToolState, cwd: string): { added: number; removed: number; lines: number; bytes: number; ms?: number } {
+  const patches = toolPatches(tool, cwd);
+  const { added, removed } = patches.length
+    ? patches.map(patchStats).reduce((a, b) => ({ added: a.added + b.added, removed: a.removed + b.removed }))
+    : { added: 0, removed: 0 };
+  const out = toolOutput(tool);
+  const lines = out ? out.split("\n").length : 0;
+  const ms = tool.startedAt !== undefined && tool.endedAt !== undefined ? Math.max(0, tool.endedAt - tool.startedAt) : undefined;
+  return { added, removed, lines, bytes: out.length, ms };
 }

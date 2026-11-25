@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import { AGENT_LOG } from "../agent/connection";
 import { choices } from "../agent/config-options";
 import { copyText } from "../core/clipboard";
-import { errorText, formatDuration, formatTokens, tildify, trunc } from "../core/format";
+import { errorText, formatDuration, formatTokens, oneLine, tildify, trunc } from "../core/format";
+import { toolHeader } from "../core/tools";
 import type { MenuOption } from "../ui/menu";
 import { hatchedTitle, styled } from "../ui/text";
 import { themes } from "../ui/theme";
@@ -54,7 +55,7 @@ export function createCommands(app: App) {
     },
     {
       id: "mode",
-      label: "Switch Mode",
+      label: "Switch Agent Mode",
       key: "shift+tab",
       slash: ["mode"],
       run: async (args) => {
@@ -62,7 +63,7 @@ export function createCommands(app: App) {
         if (!(await app.options.setByName("mode", args))) flash(`No mode matches "${args}"`, "warning");
       },
     },
-    { id: "yolo", label: "Toggle Yolo Mode", key: "ctrl+y", slash: ["yolo"], run: () => app.options.toggleYolo() },
+    { id: "yolo", label: "Toggle Tool Permissions", key: "ctrl+y", slash: ["permissions", "yolo"], run: () => app.options.toggleYolo() },
     { id: "sidebar", label: "Toggle Sidebar", key: "ctrl+b", slash: ["sidebar"], run: () => app.chrome.toggleSidebar() },
     { id: "details", label: "Toggle Details", key: "ctrl+d", slash: ["details", "verbose"], run: () => app.chrome.toggleVerbose() },
     { id: "todos", label: "Toggle To-Dos", key: "ctrl+t", slash: ["todos"], run: () => app.chrome.toggleTodos() },
@@ -72,6 +73,8 @@ export function createCommands(app: App) {
     { id: "image", label: "Paste Image", key: "ctrl+v", run: () => app.prompt.pasteImage() },
     { id: "stash", label: "Stash Prompt", key: "alt+s", run: () => app.prompt.toggleStash() },
     { id: "copy", label: "Copy Last Reply", slash: ["copy"], run: copyLastReply },
+    { id: "find", label: "Search Transcript", key: "ctrl+f", slash: ["find", "search"], run: searchTranscript },
+    { id: "wrap", label: "Toggle Diff Wrap", slash: ["wrap"], run: toggleDiffWrap },
     { id: "export", label: "Export Conversation", hint: "markdown", slash: ["export"], run: exportConversation },
     { id: "diff", label: "Show Git Diff", slash: ["diff"], run: showDiff },
     { id: "status", label: "Session Info", slash: ["status"], run: showStatus },
@@ -185,8 +188,8 @@ export function createCommands(app: App) {
       text: styled(
         ...hatchedTitle(th, title, Math.min(60, app.renderer.width - 8)),
         "\n\n",
-        ...rows.flatMap(([k, v]) => [fg(th.fgMuted)(k.padEnd(width)), fg(th.fg)(v + "\n")]),
-        footer ? fg(th.fgFaint)(footer) : "",
+        ...rows.flatMap(([k, v]) => [fg(th.fgDim)(k.padEnd(width)), fg(th.fg)(v + "\n")]),
+        footer ? fg(th.fgGutter)(footer) : "",
       ),
     });
   }
@@ -206,7 +209,7 @@ export function createCommands(app: App) {
         fg(th.fgMuted)(
           theirs.length ? `${theirs.length} more come from the agent: ctrl+p, then tab to its list.\n` : "The agent's own commands appear in ctrl+p once it lists them.\n",
         ),
-        fg(th.fgMuted)("ctrl+g shows every shortcut."),
+        fg(th.fgDim)("ctrl+g shows every shortcut."),
       ),
     });
   }
@@ -280,8 +283,25 @@ export function createCommands(app: App) {
       ...Object.values(themes).map((t) => ({ label: t.label, value: t.name, hint: t.hint })),
     ];
     const names = options.map((o) => o.value);
-    const value = args || (await app.menus.open({ title: "Themes", options, initial: names.indexOf(settings.theme) }));
-    if (!value) return;
+    const prev = settings.theme;
+    const preview = (v: string | null) => {
+      const next = (v ?? prev) as Settings["theme"];
+      if (settings.theme === next) return;
+      settings.theme = next;
+      app.chrome.applyTheme();
+    };
+    const value =
+      args ||
+      (await app.menus.open({
+        title: "Themes",
+        options,
+        initial: names.indexOf(prev),
+        onPreview: preview,
+      }));
+    if (!value) {
+      preview(null);
+      return;
+    }
     if (!names.includes(value)) return flash(`Unknown theme "${value}"`, "warning");
     settings.theme = value as Settings["theme"];
     await saveSettings(settings);
@@ -289,6 +309,13 @@ export function createCommands(app: App) {
   }
 
   async function pickMarkdownStyle(args: string) {
+    const prev = settings.markdown;
+    const preview = (v: string | null) => {
+      const next = (v ?? prev) as Settings["markdown"];
+      if (settings.markdown === next) return;
+      settings.markdown = next;
+      transcript.rebuild();
+    };
     const value =
       args ||
       (await app.menus.open({
@@ -297,13 +324,52 @@ export function createCommands(app: App) {
           { label: "Glow", value: "glow", hint: "glow's colors and headings" },
           { label: "btr", value: "btr", hint: "the theme's colors" },
         ],
-        initial: settings.markdown === "glow" ? 0 : 1,
+        initial: prev === "glow" ? 0 : 1,
+        onPreview: preview,
       }));
-    if (!value) return;
+    if (!value) {
+      preview(null);
+      return;
+    }
     if (value !== "glow" && value !== "btr") return flash(`Unknown markdown style "${value}"`, "warning");
     settings.markdown = value;
     await saveSettings(settings);
     transcript.rebuild();
+  }
+
+  function toggleDiffWrap() {
+    const on = transcript.toggleDiffWrap();
+    flash(`Diff wrapping ${on ? "on" : "off"}`);
+  }
+
+  async function searchTranscript() {
+    const options: MenuOption[] = [];
+    transcript.entries.forEach((e, i) => {
+      const it = e.item;
+      if (it.type === "user") {
+        options.push({ label: `> ${oneLine(it.text, 72)}`, value: String(i), hint: it.mode === "prompt" ? "prompt" : it.mode });
+      } else if (it.type === "assistant" && it.text.trim()) {
+        options.push({ label: oneLine(it.text, 72), value: String(i), hint: "reply" });
+      } else if (it.type === "tool") {
+        const { name, arg } = toolHeader(it.tool, app.cwd);
+        options.push({ label: `${name}${arg ? ` ${arg}` : ""}`, value: String(i), hint: "tool" });
+      } else if (it.type === "diff") {
+        const file = /^\+\+\+ (?:b\/)?(.+)$/m.exec(it.patch)?.[1]?.trim() ?? "diff";
+        options.push({ label: file, value: String(i), hint: "diff" });
+      }
+    });
+    if (!options.length) return flash("Nothing in the transcript yet");
+    const picked = await app.menus.open({
+      title: "Search Transcript",
+      options: options.reverse(),
+      filterable: true,
+      placeholder: "Jump to message, tool or file",
+      width: 90,
+    });
+    if (picked !== null) {
+      const entry = transcript.entries[Number(picked)];
+      if (entry) transcript.scrollToEntry(entry);
+    }
   }
 
   function toggleBackground() {

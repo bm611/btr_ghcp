@@ -34,9 +34,9 @@ export function toneGlyph(tone: Tone | undefined): string {
 
 /** One to-do, as the transcript, the sidebar and the pinned list draw it. */
 export function todoLine(th: Theme, e: acp.PlanEntry): StyledText {
-  if (e.status === "completed") return styled(fg(th.fgMuted)(G.check + " "), strikethrough(fg(th.fgMuted)(e.content)));
+  if (e.status === "completed") return styled(fg(th.fgDim)(G.check + " "), strikethrough(fg(th.fgDim)(e.content)));
   if (e.status === "in_progress") return styled(fg(th.fg)(G.arrow + " "), bold(fg(th.fg)(e.content)));
-  return styled(fg(th.fgFaint)(G.todo + " "), fg(th.fgSubtle)(e.content));
+  return styled(fg(th.fgGutter)(G.todo + " "), fg(th.fgSubtle)(e.content));
 }
 
 /** A color between `a` and `b`; `t` runs from 0 to 1. */
@@ -67,4 +67,54 @@ export function hatchedTitle(th: Theme, title: string, width: number, trailing =
     fg(th.bg)(" "),
     ...gradient(G.hatch.repeat(fill), th.primary, th.secondary, { offset: title.length + 1, span }),
   ];
+}
+
+/** A thin rule that fills `width` cells, for section separators. */
+export function rule(th: Theme, width: number): TextChunk[] {
+  return [fg(th.separatorSubtle)(G.rule.repeat(Math.max(0, width)))];
+}
+
+/** Key-value pair styled for info blocks: the key dim, the value bright. */
+export function kv(th: Theme, key: string, value: string, keyWidth: number): TextChunk[] {
+  return [fg(th.fgMuted)(key.padEnd(keyWidth)), fg(th.fg)(value)];
+}
+
+/** A label with a dot prefix, used for section headers in the transcript. */
+export function sectionLabel(th: Theme, text: string): TextChunk[] {
+  return [fg(th.fgDim)(G.dot + " "), bold(fg(th.fg)(text))];
+}
+
+/** Renders `text` with characters at `indices` highlighted in `matchColor` (bold). */
+export function highlightMatches(
+  text: string,
+  indices: number[],
+  baseColor: string,
+  matchColor: string,
+  baseBold = false,
+): TextChunk[] {
+  if (!indices.length) {
+    const c = fg(baseColor)(text);
+    return [baseBold ? bold(c) : c];
+  }
+  const set = new Set(indices);
+  const out: TextChunk[] = [];
+  let buf = "";
+  let bufMatched = false;
+  const flush = () => {
+    if (!buf) return;
+    if (bufMatched) out.push(bold(fg(matchColor)(buf)));
+    else {
+      const c = fg(baseColor)(buf);
+      out.push(baseBold ? bold(c) : c);
+    }
+    buf = "";
+  };
+  for (let i = 0; i < text.length; i++) {
+    const hit = set.has(i);
+    if (buf && hit !== bufMatched) flush();
+    bufMatched = hit;
+    buf += text[i]!;
+  }
+  flush();
+  return out;
 }

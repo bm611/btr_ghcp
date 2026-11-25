@@ -1,11 +1,11 @@
-import { bold, fg } from "@opentui/core";
+import { fg } from "@opentui/core";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mentionAt } from "../core/attachments";
+import { mentionAt, slashAt } from "../core/attachments";
 import { listFiles } from "../core/files";
-import { truncStart } from "../core/format";
-import { fuzzyFilter } from "../core/fuzzy";
-import { styled } from "../ui/text";
+import { trunc, truncStart } from "../core/format";
+import { fuzzyFilter, fuzzyMatch } from "../core/fuzzy";
+import { highlightMatches, styled } from "../ui/text";
 import { G } from "../ui/theme";
 import type { InputMode } from "../ui/transcript";
 import type { App } from "./app";
@@ -14,14 +14,23 @@ import { MAX_COMPLETIONS } from "./view";
 
 export type Prompt = ReturnType<typeof createPrompt>;
 
-/** The prompt: its modes, @ completions, history, pastes, the external editor and the stash. */
+type Completion = {
+  label: string;
+  hint?: string;
+  insert: string;
+  isDir?: boolean;
+};
+
+/** The prompt: its modes, @ and / completions, attachments, history, pastes, editor and stash. */
 export function createPrompt(app: App) {
   const { view, history, attachments, cwd } = app;
   const { input } = view;
   let mode: InputMode = "prompt";
   let stash: string | null = null;
-  /** The paths offered for the @mention at the cursor. */
-  let matches: string[] = [];
+  /** The options offered for the `@mention` or `/command` at the cursor. */
+  let matches: Completion[] = [];
+  let completionKind: "mention" | "slash" | null = null;
+  let completionQuery = "";
   let selected = 0;
   let dismissed = false;
   /** Set while the prompt changes its own text, so the change is not taken as typing. */
@@ -59,16 +68,83 @@ export function createPrompt(app: App) {
   function draw() {
     const th = app.look.th;
     const rows = Math.max(1, input.height);
-    const rail = mode === "prompt" ? G.rail : MODES[mode].rail;
-    const color = mode === "prompt" ? th.fg : th.fgMuted;
-    view.promptMark.content = styled(fg(color)(rail), fg(th.fgFaint)(("\n" + (mode === "prompt" ? G.rail : " ")).repeat(rows - 1)));
-    input.placeholder = mode === "prompt" ? "" : MODES[mode].placeholder;
+    const rail = mode === "prompt" ? G.prompt : MODES[mode].rail;
+    const color = mode === "prompt" ? th.info : th.fgDim;
+    view.promptMark.content = styled(fg(color)(rail), fg(th.fgGutter)(("\n" + (mode === "prompt" ? G.prompt : " ")).repeat(rows - 1)));
+    input.placeholder = mode === "prompt" ? "Message the agent… (/ commands, @ files, ? keys)" : MODES[mode].placeholder;
   }
 
-  // ── @ completions ───────────────────────────────────────────────────────
+  /** Shows compact chips for `@` files, pasted blocks and images currently in the prompt. */
+  function drawAttachments() {
+    const desc = mode === "prompt" ? attachments.describe(input.plainText) : { mentions: [], pastes: [], images: [] };
+    const chips: string[] = [
+      ...desc.mentions.map((m) => `@${truncStart(m, 28)}`),
+      ...desc.pastes.map((p) => `Paste #${p.id} (${p.lines}L)`),
+      ...desc.images.map((im) => `Image #${im.id} (${im.mimeType.split("/")[1] ?? "img"})`),
+    ];
+    view.attachmentBar.visible = chips.length > 0;
+    if (!chips.length) return;
+    const th = app.look.th;
+    view.attachmentBar.content = styled(
+      fg(th.fgDim)(`${G.model} `),
+      ...chips.flatMap((c, i) => (i ? [fg(th.fgGutter)("  ·  "), fg(th.fgSubtle)(c)] : [fg(th.fgSubtle)(c)])),
+    );
+  }
+
+  // ── @ and / completions ─────────────────────────────────────────────────
+  function slashCandidates(): Completion[] {
+    const out: Completion[] = [];
+    const seen = new Set<string>();
+    for (const c of app.commands.list) {
+      for (const s of c.slash ?? []) {
+        if (seen.has(s)) continue;
+        seen.add(s);
+        out.push({ label: `/${s}`, hint: c.key ?? c.label, insert: `/${s} ` });
+      }
+    }
+    for (const c of app.conversation.commands) {
+      if (seen.has(c.name)) continue;
+      seen.add(c.name);
+      const hint = c.description.split(/\.\s/)[0]!.replace(/\.$/, "");
+      out.push({ label: `/${c.name}`, hint: trunc(hint, 32), insert: `/${c.name}${c.input ? " " : ""}` });
+    }
+    return out;
+  }
+
   function updateCompletions() {
-    const mention = !dismissed && mode === "prompt" ? mentionAt(input.plainText, cursorIndex()) : null;
-    matches = mention ? fuzzyFilter(mention.query, listFiles(cwd), (p) => p, 50) : [];
+    if (dismissed || mode !== "prompt") {
+      matches = [];
+      completionKind = null;
+      completionQuery = "";
+      drawCompletions();
+      return;
+    }
+    const text = input.plainText;
+    const at = cursorIndex();
+    const mention = mentionAt(text, at);
+    if (mention) {
+      completionKind = "mention";
+      completionQuery = mention.query;
+      matches = fuzzyFilter(mention.query, listFiles(cwd), (p) => p, 50).map((p) => ({
+        label: p,
+        hint: p.endsWith("/") ? "dir" : undefined,
+        insert: `@${/\s/.test(p) ? `"${p}"` : p}${p.endsWith("/") ? "" : " "}`,
+        isDir: p.endsWith("/"),
+      }));
+    } else {
+      const slash = slashAt(text, at);
+      const candidates = slash && slash.query.length > 0 ? slashCandidates() : [];
+      const exact = slash && candidates.some((c) => c.label === `/${slash.query}`);
+      if (slash && slash.query.length > 0 && !exact) {
+        completionKind = "slash";
+        completionQuery = slash.query;
+        matches = fuzzyFilter(slash.query, candidates, (c) => `${c.label.slice(1)} ${c.hint ?? ""}`, 30);
+      } else {
+        matches = [];
+        completionKind = null;
+        completionQuery = "";
+      }
+    }
     selected = Math.min(selected, Math.max(0, matches.length - 1));
     drawCompletions();
   }
@@ -79,32 +155,48 @@ export function createPrompt(app: App) {
     if (!open) return;
     const th = app.look.th;
     const start = Math.max(0, Math.min(selected - Math.floor(MAX_COMPLETIONS / 2), matches.length - MAX_COMPLETIONS));
-    const width = Math.min(70, Math.max(24, ...matches.slice(start, start + MAX_COMPLETIONS).map((m) => m.length + 4)));
+    const slice = matches.slice(start, start + MAX_COMPLETIONS);
+    const maxLabel = Math.max(20, ...slice.map((m) => m.label.length + (m.hint ? m.hint.length + 3 : 0) + 4));
+    const width = Math.min(76, maxLabel);
     view.completions.width = width + 2;
+    view.completions.border = true;
+    view.completions.borderStyle = "single";
+    view.completions.borderColor = th.separatorSubtle;
+    view.completions.paddingX = 1;
     view.completionRows.forEach((row, i) => {
       const m = matches[start + i];
       row.visible = !!m;
       if (!m) return;
       const on = start + i === selected;
-      row.bg = app.settings.background ? th.bg : "transparent";
+      const hintStr = m.hint ? `  ${m.hint}` : "";
+      const avail = Math.max(10, width - 4 - hintStr.length);
+      const shownLabel = truncStart(m.label, avail);
+      // Match indices only map cleanly when not truncated from the start.
+      const match = shownLabel === m.label && completionQuery ? fuzzyMatch(completionQuery, shownLabel) : null;
+      const baseColor = on ? th.fg : m.isDir ? th.fgSubtle : th.fgMuted;
+      row.bg = on ? th.bgRaised : app.settings.background ? th.bg : "transparent";
       row.content = styled(
         fg(th.fg)(on ? `${G.select} ` : "  "),
-        (on ? (t: string) => bold(fg(th.fg)(t)) : fg(m.endsWith("/") ? th.fgSubtle : th.fgMuted))(truncStart(m, width - 4)),
+        ...highlightMatches(shownLabel, match?.indices ?? [], baseColor, th.mono ? th.info : th.secondary, on),
+        hintStr ? fg(th.fgGutter)(hintStr) : "",
       );
+      row.onMouseDown = () => {
+        selected = start + i;
+        completeMention();
+      };
     });
   }
 
-  /** Replaces the `@partial` being typed with the selected path. */
+  /** Replaces the `@partial` or `/partial` being typed with the selected completion. */
   function completeMention() {
     const m = matches[selected];
     if (!m) return;
     const value = input.plainText;
     const at = cursorIndex();
-    const mention = mentionAt(value, at);
-    if (!mention) return;
-    const insert = `@${/\s/.test(m) ? `"${m}"` : m}${m.endsWith("/") ? "" : " "}`;
-    input.setText(value.slice(0, mention.start) + insert + value.slice(at));
-    input.cursorOffset = input.editBuffer.stringIndexToCellOffset(mention.start + insert.length);
+    const span = completionKind === "slash" ? slashAt(value, at) : mentionAt(value, at);
+    if (!span) return;
+    input.setText(value.slice(0, span.start) + m.insert + value.slice(at));
+    input.cursorOffset = input.editBuffer.stringIndexToCellOffset(span.start + m.insert.length);
     onInputChange();
   }
 
@@ -136,6 +228,7 @@ export function createPrompt(app: App) {
       dismissed = false;
       selected = 0;
       updateCompletions();
+      drawAttachments();
     } finally {
       changing = false;
     }
@@ -145,7 +238,7 @@ export function createPrompt(app: App) {
   // InputRenderable it never emits "input" or "enter" events.
   input.onContentChange = onInputChange;
   input.onCursorChange = () => {
-    if (!changing && input.plainText.includes("@")) updateCompletions();
+    if (!changing && (input.plainText.includes("@") || input.plainText.startsWith("/"))) updateCompletions();
   };
   input.onSubmit = () => void submit();
 
@@ -178,6 +271,7 @@ export function createPrompt(app: App) {
     setTimeout(fitInput, 0);
     matches = [];
     drawCompletions();
+    drawAttachments();
   }
 
   /** Steps back (-1) or forward (+1) through the history; false at either end. */
@@ -199,6 +293,21 @@ export function createPrompt(app: App) {
       width: 90,
     });
     if (value !== null) recall(all[Number(value)]!);
+  }
+
+  // ── queued messages ─────────────────────────────────────────────────────
+  function editQueued(index?: number) {
+    const popped = app.conversation.popQueue(index);
+    if (popped === undefined) return;
+    const cur = input.plainText;
+    setInput(cur ? `${popped}\n${cur}` : popped);
+    app.chrome.flash("Moved queued message back to prompt");
+  }
+
+  function dropQueued(index?: number) {
+    const popped = app.conversation.popQueue(index);
+    if (popped === undefined) return;
+    app.chrome.flash("Dropped queued message");
   }
 
   // ── more ways to fill the prompt ────────────────────────────────────────
@@ -225,8 +334,10 @@ export function createPrompt(app: App) {
 
   async function pasteImage() {
     const placeholder = await attachments.imageFromClipboard();
-    if (placeholder) input.insertText(placeholder + " ");
-    else app.chrome.flash("No image on the clipboard", "warning");
+    if (placeholder) {
+      input.insertText(placeholder + " ");
+      drawAttachments();
+    } else app.chrome.flash("No image on the clipboard", "warning");
   }
 
   /** A bracketed paste: a dragged image file becomes an image, a long text a placeholder. */
@@ -235,6 +346,7 @@ export function createPrompt(app: App) {
     void (async () => {
       const image = await attachments.imageFromPath(pasted);
       input.insertText(image ? image + " " : attachments.paste(pasted));
+      drawAttachments();
     })();
   }
 
@@ -260,7 +372,7 @@ export function createPrompt(app: App) {
     get stash() {
       return stash;
     },
-    /** Whether @ completions are showing. */
+    /** Whether @ or / completions are showing. */
     get completing() {
       return matches.length > 0;
     },
@@ -268,6 +380,7 @@ export function createPrompt(app: App) {
     setMode,
     draw,
     drawCompletions,
+    drawAttachments,
     completeMention,
     moveCompletion(delta: number) {
       selected = (selected + delta + matches.length) % matches.length;
@@ -299,6 +412,8 @@ export function createPrompt(app: App) {
     },
     historyStep,
     searchHistory,
+    editQueued,
+    dropQueued,
     editExternally,
     pasteImage,
     paste,

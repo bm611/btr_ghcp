@@ -70,8 +70,8 @@ A paste longer than four lines folds into `[Pasted text #1 +12 lines]` and expan
 | `Ctrl+N` | New session |
 | `Ctrl+S` | Sessions: resume an earlier one |
 | `Ctrl+L` | Switch model |
-| `Shift+Tab` | Cycle the agent's modes (Agent, Plan, Autopilot) |
-| `Ctrl+Y` | Yolo mode: the agent runs tools without asking (its allow-all option) |
+| `Shift+Tab` | Cycle the agent mode (Agent, Plan, Autopilot) |
+| `Ctrl+Y` | Toggle tool permissions (ask or full access) |
 | `Ctrl+D` | Details: full tool output and thinking, and every folded turn expanded |
 | `Ctrl+B` | Toggle the sidebar (off by default; windows 110 columns or wider) |
 | `Ctrl+T` | Pin the to-do list above the prompt |
@@ -85,9 +85,9 @@ Selecting text with the mouse copies it. When a turn ends or needs approval whil
 
 Permission requests open a panel at the bottom with what the tool wants, the command (`$ …`) or diff, and numbered choices. Pick with `1`–`3`, `↑`/`↓` and `Enter`, or press `a` (allow), `s` (allow for the session) or `d` (deny); `Esc` declines and interrupts the turn.
 
-The status line under the prompt reads like fx's: `ask` (or `full access` in yolo mode) · model · mode when it is not the default · context `15.4k/128k 12%`. Messages flash in its place for a moment. With Copilot's `auto` model the line shows what auto picked for the latest turn, as `auto → mai code 2 flash`. ACP only ever reports `auto`, so btr reads that from the event log Copilot keeps in `~/.copilot/session-state/<session>/events.jsonl` (or under `$COPILOT_HOME`); other agents just show their model.
+The status line keeps agent behavior and tool approval separate: `permissions: ask` (or `permissions: full access`) · model · `agent: plan` when the agent mode is not the default · context `15.4k/128k 12%`. Messages flash in its place for a moment. With Copilot's `auto` model the line shows what auto picked for the latest turn, as `auto → mai code 2 flash`. ACP only ever reports `auto`, so btr reads that from the event log Copilot keeps in `~/.copilot/session-state/<session>/events.jsonl` (or under `$COPILOT_HOME`); other agents just show their model.
 
-The sidebar, off by default, shows the session title and directory, the model and mode, a context-usage bar, the files the agent changed with their line counts, the to-do list, and whether yolo mode is on.
+The sidebar, off by default, shows the session title and directory, the model and agent mode, a context-usage bar, the files the agent changed with their line counts, the to-do list, and the current tool permission setting.
 
 ## Commands
 
@@ -100,8 +100,8 @@ Commands can also be typed, for example from history or after the palette fills 
 | `/help` | List the commands |
 | `/new`, `/clear` | Start a new conversation |
 | `/sessions [id]`, `/resume [id]` | Resume an earlier conversation |
-| `/model [name]`, `/mode [name]` | Switch model or mode, from a list or by name |
-| `/yolo`, `/sidebar`, `/details`, `/todos`, `/keys` | The toggles |
+| `/model [name]`, `/mode [name]` | Switch model or agent mode, from a list or by name |
+| `/permissions`, `/sidebar`, `/details`, `/todos`, `/keys` | Tool approval and display toggles |
 | `/status`, `/cost` | Session info and usage |
 | `/copy`, `/export [file]`, `/diff` | Copy the last reply, save the conversation as Markdown, show uncommitted changes |
 | `/theme [auto\|fx\|fx-light\|charm\|daylight]` | Theme |
@@ -159,7 +159,7 @@ src/
     chrome.ts           the status line, sidebar, shortcut panel, to-dos and working line
     conversation.ts     session updates, turns, the queue, and sessions
     permission.ts       the permission request panel
-    options.ts          switching model and mode, and yolo mode
+    options.ts          switching model and agent mode, and tool permissions
     prompt.ts           the prompt: completions, history, pastes, editor, stash
     modes.ts            the ! shell and # note modes
     commands.ts         every command: the palette, /commands and their keys

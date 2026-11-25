@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { blend, gradient, hatchedTitle } from "../src/ui/text";
+import { blend, gradient, hatchedTitle, highlightMatches } from "../src/ui/text";
 import { themeFor, themes } from "../src/ui/theme";
 import { chord } from "../src/tui/keys";
 
@@ -23,4 +23,13 @@ test("keys are named the way bindings write them", () => {
   expect(chord({ name: "n", ctrl: true, meta: false, shift: false })).toBe("ctrl+n");
   expect(chord({ name: "s", ctrl: false, meta: true, shift: false })).toBe("alt+s");
   expect(chord({ name: "tab", ctrl: false, meta: false, shift: true })).toBe("shift+tab");
+});
+
+test("highlightMatches splits matched indices and fx themes accent warning/yolo/plan", () => {
+  const chunks = highlightMatches("Switch Model", [0, 7], "#888888", "#ffffff");
+  expect(chunks.map((c) => c.text).join("")).toBe("Switch Model");
+  expect(chunks.length).toBeGreaterThan(2);
+  expect(themes.fx.warning).not.toBe(themes.fx.fgSubtle);
+  expect(themes.fx.yolo).not.toBe(themes.fx.fg);
+  expect(themes.fx.plan).not.toBe(themes.fx.fg);
 });

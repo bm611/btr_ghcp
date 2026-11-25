@@ -70,7 +70,7 @@ export function createConversation(app: App) {
   }
 
   /** The welcome line, as fx prints it: "btr v0.2.0 · / for commands". */
-  const splash = (): Extract<Item, { type: "splash" }> => ({ type: "splash", name: "btr", detail: `v${VERSION} · / for commands` });
+  const splash = (): Extract<Item, { type: "splash" }> => ({ type: "splash", name: "btr", detail: `v${VERSION} · / for commands · ? for keys` });
 
   function refreshSplash() {
     const first = transcript.entries[0];
@@ -129,6 +129,7 @@ export function createConversation(app: App) {
         setLabel("Generating");
         if (!cur.reply) cur.reply = transcript.add({ type: "assistant", text: "", streaming: !replaying });
         transcript.append(cur.reply, t);
+        if (!replaying) chrome.markUnread();
         return;
       }
       case "agent_thought_chunk": {
@@ -140,29 +141,35 @@ export function createConversation(app: App) {
         if (turn) turn.chars += t.length;
         setLabel("Thinking");
         if (!cur.thought) cur.thought = transcript.add({ type: "thought", text: "", since: Date.now(), ms: replaying ? 0 : undefined });
-        cur.thought.item.text += t;
-        transcript.update(cur.thought);
+        transcript.appendThought(cur.thought, t);
+        if (!replaying) chrome.markUnread();
         return;
       }
       case "tool_call": {
         endBlocks();
+        const status = u.status ?? "pending";
+        const now = Date.now();
         const tool: ToolState = {
           id: u.toolCallId,
           title: u.title,
           kind: u.kind,
-          status: u.status ?? "pending",
+          status,
           rawInput: u.rawInput,
           rawOutput: u.rawOutput,
           content: u.content ?? [],
           locations: u.locations ?? [],
+          startedAt: replaying ? undefined : now,
+          endedAt: !replaying && (status === "completed" || status === "failed") ? now : undefined,
         };
         setLabel("Running");
         const existing = tools.get(u.toolCallId);
         if (existing) {
+          tool.startedAt ??= existing.item.tool.startedAt;
           existing.item.tool = tool;
           transcript.update(existing);
         } else tools.set(u.toolCallId, transcript.add({ type: "tool", tool }));
         recordChanges(tool);
+        if (!replaying) chrome.markUnread();
         return;
       }
       case "tool_call_update": {
@@ -176,7 +183,10 @@ export function createConversation(app: App) {
         if (u.locations) tool.locations = u.locations;
         if (u.rawInput !== undefined) tool.rawInput = u.rawInput;
         if (u.rawOutput !== undefined) tool.rawOutput = u.rawOutput;
-        if (u.status === "completed" || u.status === "failed") setLabel("Working");
+        if (u.status === "completed" || u.status === "failed") {
+          if (!replaying && tool.startedAt !== undefined && tool.endedAt === undefined) tool.endedAt = Date.now();
+          setLabel("Working");
+        }
         transcript.update(entry);
         recordChanges(tool);
         return;
@@ -244,7 +254,17 @@ export function createConversation(app: App) {
   async function send(prompt: string) {
     const { agent, chrome, options } = app;
     if (disconnected) return void note("The agent is not connected.", "error");
-    const asked = transcript.add({ type: "user", text: prompt, mode: "prompt" });
+    const desc = app.attachments.describe(prompt);
+    const attached = [
+      ...desc.mentions.map((m) => `@${m}`),
+      ...desc.images.map((im) => `[Image #${im.id}]`),
+    ];
+    const asked = transcript.add({
+      type: "user",
+      text: prompt,
+      mode: "prompt",
+      ...(attached.length ? { attachments: attached } : {}),
+    });
     cur.reply = cur.thought = cur.plan = cur.user = undefined;
     busy = true;
     turns++;
@@ -292,12 +312,21 @@ export function createConversation(app: App) {
       // Calls the agent never finished stop blinking and read as abandoned.
       for (const e of tools.values()) if (e.item.tool.status === "pending" || e.item.tool.status === "in_progress") transcript.update(e);
       if (!cancelled && !outcome) foldTurn(asked);
+      const replyText = (() => {
+        for (let i = transcript.entries.length - 1; i >= 0; i--) {
+          const e = transcript.entries[i]!;
+          if (e === asked) break;
+          if (e.item.type === "assistant" && e.item.text.trim()) return e.item.text;
+        }
+        return undefined;
+      })();
       if (cancelled) transcript.add({ type: "footer", text: `${G.stop} Cancelled · What should the agent do differently?`, tone: "text" });
       else
         transcript.add({
           type: "footer",
           text: [outcome ? `${outcome} after ${formatDuration(ms)}` : `Worked for ${formatDuration(ms)}`, options.modelLabel()].filter(Boolean).join(" · "),
           tone,
+          replyText,
         });
       chrome.setTitle();
       app.prompt.draw();
@@ -346,6 +375,14 @@ export function createConversation(app: App) {
       queue.push(prompt);
       app.chrome.drawQueue();
     } else void send(prompt);
+  }
+
+  /** Removes and returns the queued message at `index` (defaults to the last one). */
+  function popQueue(index = queue.length - 1): string | undefined {
+    if (index < 0 || index >= queue.length) return undefined;
+    const [removed] = queue.splice(index, 1);
+    app.chrome.drawQueue();
+    return removed;
   }
 
   function onAgentExit(code: number) {
@@ -420,6 +457,7 @@ export function createConversation(app: App) {
     ready: () => markReady(),
     send,
     passToAgent,
+    popQueue,
     interrupt,
     reset,
     refreshSplash,

@@ -1,16 +1,16 @@
 import { BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable, TextareaRenderable } from "@opentui/core";
 
-/** Rows of @ completions shown at once. */
+/** Rows of @ or / completions shown at once. */
 export const MAX_COMPLETIONS = 8;
 export const SIDEBAR_WIDTH = 36;
 
 export type View = ReturnType<typeof createView>;
 
 /**
- * The layout. A column holds, top to bottom: the conversation, the pinned to-dos, the
- * working line, queued messages, @ completions, the prompt, the shortcut panel and the
- * status line; the sidebar sits beside it. This only builds the nodes: the other modules
- * fill them in.
+ * The layout. A column holds, top to bottom: the conversation, the jump-to-bottom pill,
+ * the pinned to-dos, the working line, queued messages, attachments, completions, the
+ * prompt, the shortcut panel and the status line; the sidebar sits beside it. This only
+ * builds the nodes: the other modules fill them in.
  */
 export function createView(renderer: CliRenderer) {
   const text = (extra: Record<string, unknown> = {}) => new TextRenderable(renderer, { content: "", flexShrink: 0, ...extra });
@@ -43,7 +43,7 @@ export function createView(renderer: CliRenderer) {
    * size changes give the box its height. Shrinking stays on: once the conversation outgrows
    * the window, the box is squeezed to the rows left above the prompt, and scrolls.
    */
-  const list = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0, gap: 1, paddingTop: 1 });
+  const list = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0, gap: 1, paddingTop: 1, paddingBottom: 1 });
   scroll.add(list);
   list.onSizeChange = () => {
     const want = Math.max(1, list.height);
@@ -57,10 +57,13 @@ export function createView(renderer: CliRenderer) {
     });
   };
 
+  const scrollJump = text({ marginTop: 0, paddingX: 2, visible: false, wrapMode: "none", truncate: true });
+  scrollJump.onMouseDown = () => scroll.scrollTo(Infinity);
   const todoPanel = text({ marginTop: 1, paddingX: 2, visible: false });
   const spinner = text({ marginTop: 1, paddingX: 2, visible: false, wrapMode: "none", truncate: true });
-  const queued = text({ marginTop: 1, paddingX: 2, visible: false });
-  for (const n of [todoPanel, spinner, queued]) main.add(n);
+  const queued = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0, marginTop: 1, paddingX: 2, visible: false });
+  const attachmentBar = text({ marginTop: 1, paddingX: 2, visible: false, wrapMode: "none", truncate: true });
+  for (const n of [scrollJump, todoPanel, spinner, queued, attachmentBar]) main.add(n);
 
   const completions = new BoxRenderable(renderer, {
     flexDirection: "column",
@@ -109,17 +112,59 @@ export function createView(renderer: CliRenderer) {
     paddingX: 1,
     paddingTop: 1,
   });
-  const sidebarText = text({ flexShrink: 1 });
-  sidebar.add(sidebarText);
+  const sidebarScroll = new ScrollBoxRenderable(renderer, {
+    flexGrow: 1,
+    flexShrink: 1,
+    verticalScrollbarOptions: { visible: false },
+    contentOptions: { flexDirection: "column" },
+  });
+  const sidebarHead = text({ flexShrink: 0 });
+  const sidebarFiles = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0 });
+  const sidebarFoot = text({ flexShrink: 0 });
+  sidebarScroll.add(sidebarHead);
+  sidebarScroll.add(sidebarFiles);
+  sidebarScroll.add(sidebarFoot);
+  sidebar.add(sidebarScroll);
   body.add(sidebar);
 
   const helpPanel = text({ paddingX: 2, paddingY: 1, visible: false, wrapMode: "none", truncate: true });
   main.add(helpPanel);
 
-  const status = text({ paddingX: 2, paddingBottom: 1, wrapMode: "none", truncate: true });
+  const status = new BoxRenderable(renderer, {
+    flexDirection: "row",
+    flexShrink: 0,
+    paddingX: 2,
+    paddingBottom: 1,
+  });
+  const statusText = text({ flexGrow: 1, flexShrink: 1, wrapMode: "none", truncate: true });
+  const statusContext = text({ flexShrink: 0, marginLeft: 2, wrapMode: "none", truncate: true });
+  status.add(statusText);
+  status.add(statusContext);
   main.add(status);
   // Takes up whatever room is left below the prompt.
   main.add(new BoxRenderable(renderer, { flexGrow: 1, flexShrink: 1, minHeight: 0 }));
 
-  return { root, scroll, list, todoPanel, spinner, queued, completions, completionRows, promptMark, input, sidebar, sidebarText, helpPanel, status };
+  return {
+    root,
+    scroll,
+    list,
+    scrollJump,
+    todoPanel,
+    spinner,
+    queued,
+    attachmentBar,
+    completions,
+    completionRows,
+    promptMark,
+    input,
+    sidebar,
+    sidebarScroll,
+    sidebarHead,
+    sidebarFiles,
+    sidebarFoot,
+    helpPanel,
+    status,
+    statusText,
+    statusContext,
+  };
 }

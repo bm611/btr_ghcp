@@ -14,16 +14,20 @@ export type Theme = {
   secondary: string;
   /** Text on a primary background. */
   onPrimary: string;
-  /** Text, from most to least prominent. */
+  /** Text, from most to least prominent. Six levels give a clear reading order. */
   fg: string;
   fgSubtle: string;
   fgMuted: string;
+  fgDim: string;
   fgFaint: string;
+  fgGutter: string;
   /** Surfaces, from the page to the most raised. */
   bg: string;
   bgPanel: string;
   bgRaised: string;
+  bgOverlay: string;
   separator: string;
+  separatorSubtle: string;
   success: string;
   error: string;
   warning: string;
@@ -43,8 +47,9 @@ export type Theme = {
   type: string;
 };
 
-// xterm-256 grays, as fx draws with them: 235 #262626, 239 #4e4e4e, 240 #585858,
-// 245 #8a8a8a, 250 #bcbcbc, 252 #d0d0d0, 255 #eeeeee. Diff markers are fx's green and red.
+// xterm-256 grays, as fx draws with them: 235 #262626, 237 #3a3a3a, 239 #4e4e4e,
+// 240 #585858, 243 #767676, 245 #8a8a8a, 247 #9e9e9e, 250 #bcbcbc, 252 #d0d0d0,
+// 255 #eeeeee. Diff markers are fx's green and red.
 // A theme added here shows up in the picker, /theme and the settings on its own.
 export const themes = {
   fx: {
@@ -58,18 +63,22 @@ export const themes = {
     onPrimary: "#262626",
     fg: "#eeeeee",
     fgSubtle: "#d0d0d0",
-    fgMuted: "#8a8a8a",
+    fgMuted: "#9e9e9e",
+    fgDim: "#8a8a8a",
     fgFaint: "#585858",
+    fgGutter: "#3a3a3a",
     bg: "#000000",
-    bgPanel: "#121212",
-    bgRaised: "#4e4e4e",
+    bgPanel: "#0d0d0d",
+    bgRaised: "#2a2a2a",
+    bgOverlay: "#000000cc",
     separator: "#3a3a3a",
-    success: "#d0d0d0",
+    separatorSubtle: "#262626",
+    success: "#30a46c",
     error: "#e5484d",
-    warning: "#d0d0d0",
+    warning: "#e5a93c",
     info: "#5fafff",
-    yolo: "#eeeeee",
-    plan: "#eeeeee",
+    yolo: "#e5a93c",
+    plan: "#5fafff",
     diffAdded: "#0b1a12",
     diffRemoved: "#1f0d0e",
     diffAddedFg: "#30a46c",
@@ -92,18 +101,22 @@ export const themes = {
     onPrimary: "#eeeeee",
     fg: "#262626",
     fgSubtle: "#444444",
-    fgMuted: "#767676",
+    fgMuted: "#626262",
+    fgDim: "#767676",
     fgFaint: "#9e9e9e",
+    fgGutter: "#d0d0d0",
     bg: "#ffffff",
-    bgPanel: "#f3f3f3",
-    bgRaised: "#c6c6c6",
+    bgPanel: "#f7f7f7",
+    bgRaised: "#e8e8e8",
+    bgOverlay: "#ffffffcc",
     separator: "#d0d0d0",
-    success: "#444444",
+    separatorSubtle: "#e8e8e8",
+    success: "#2b8a5a",
     error: "#cd2b31",
-    warning: "#444444",
+    warning: "#b26b00",
     info: "#005faf",
-    yolo: "#262626",
-    plan: "#262626",
+    yolo: "#b26b00",
+    plan: "#005faf",
     diffAdded: "#e9f6ef",
     diffRemoved: "#fcecec",
     diffAddedFg: "#30a46c",
@@ -127,11 +140,15 @@ export const themes = {
     fg: "#dfdbdd",
     fgSubtle: "#bfbcc8",
     fgMuted: "#858392",
+    fgDim: "#706d7d",
     fgFaint: "#605f6b",
+    fgGutter: "#3a3943",
     bg: "#201f26",
-    bgPanel: "#2d2c35",
+    bgPanel: "#262530",
     bgRaised: "#3a3943",
+    bgOverlay: "#201f26cc",
     separator: "#3a3943",
+    separatorSubtle: "#2d2c35",
     success: "#12c78f",
     error: "#eb4268",
     warning: "#f5ef34",
@@ -161,11 +178,15 @@ export const themes = {
     fg: "#201f26",
     fgSubtle: "#3a3943",
     fgMuted: "#605f6b",
+    fgDim: "#767484",
     fgFaint: "#858392",
+    fgGutter: "#dfdbdd",
     bg: "#fffaf1",
-    bgPanel: "#f1efef",
+    bgPanel: "#f5f3f3",
     bgRaised: "#dfdbdd",
+    bgOverlay: "#fffaf1cc",
     separator: "#dfdbdd",
+    separatorSubtle: "#ece9e9",
     success: "#0a9c77",
     error: "#d3254e",
     warning: "#a18800",
@@ -203,11 +224,14 @@ export const G = {
   model: "◇",
   diamond: "◆",
   thick: "▌",
+  thin: "▏",
   rule: "─",
+  ruleThick: "━",
   ellipsis: "…",
   prompt: ">",
   thought: "∴",
   rail: "┃",
+  railThin: "│",
   fail: "✗",
   select: "›",
   stop: "▪",
@@ -215,6 +239,10 @@ export const G = {
   todo: "○",
   closed: "▸",
   open: "▾",
+  bullet: "•",
+  middot: "·",
+  pipe: "│",
+  corner: "└",
   // A folded turn's summary. Text-presentation symbols, one cell wide, in most fonts.
   tools: "⚙",
   read: "≡",
@@ -225,6 +253,8 @@ export const G = {
   del: "⌫",
   move: "⇢",
   fetch: "⇣",
+  down: "↓",
+  wrap: "↩",
 };
 
 export function syntaxStyleFor(th: Theme, scene: Parameters<typeof SyntaxStyle.fromStyles>[1]) {
@@ -241,11 +271,11 @@ export function syntaxStyleFor(th: Theme, scene: Parameters<typeof SyntaxStyle.f
       "markup.raw": { fg: th.code },
       "markup.raw.block": { fg: th.fg },
       "markup.link.label": { fg: th.info, underline: true },
-      "markup.link.url": { fg: th.fgMuted },
+      "markup.link.url": { fg: th.fgDim },
       "markup.link": { fg: th.info },
       "markup.list": { fg: th.primary },
       "markup.quote": { fg: th.fgMuted, italic: true },
-      conceal: { fg: th.fgFaint },
+      conceal: { fg: th.fgGutter },
       keyword: { fg: th.keyword },
       string: { fg: th.string },
       comment: { fg: th.fgMuted, italic: true },

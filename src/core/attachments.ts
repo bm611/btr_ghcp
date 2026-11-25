@@ -89,6 +89,39 @@ export class Attachments {
     }
     return [{ type: "text", text: body }, ...links, ...images];
   }
+
+  /** Summarizes placeholders and `@` mentions currently present in `text` for UI chips. */
+  describe(text: string): { mentions: string[]; pastes: { id: number; lines: number }[]; images: { id: number; mimeType: string }[] } {
+    const pastes: { id: number; lines: number }[] = [];
+    const seenPaste = new Set<number>();
+    for (const m of text.matchAll(PASTE_RE)) {
+      const id = Number(m[1]);
+      if (seenPaste.has(id)) continue;
+      const body = this.pastes.get(id);
+      if (body === undefined) continue;
+      seenPaste.add(id);
+      pastes.push({ id, lines: body.split("\n").length });
+    }
+    const images: { id: number; mimeType: string }[] = [];
+    const seenImage = new Set<number>();
+    for (const m of text.matchAll(IMAGE_RE)) {
+      const id = Number(m[1]);
+      if (seenImage.has(id)) continue;
+      const img = this.images.get(id);
+      if (!img) continue;
+      seenImage.add(id);
+      images.push({ id, mimeType: img.mimeType });
+    }
+    const mentions: string[] = [];
+    const seenMention = new Set<string>();
+    for (const m of text.matchAll(MENTION_RE)) {
+      const rel = m[2]!.replace(/^"(.*)"$/, "$1").replace(/[.,;:!?)]+$/, "");
+      if (!rel || seenMention.has(rel)) continue;
+      seenMention.add(rel);
+      mentions.push(rel);
+    }
+    return { mentions, pastes, images };
+  }
 }
 
 /** The `@partial` being typed just before the cursor, if any. */
@@ -96,4 +129,14 @@ export function mentionAt(text: string, cursor: number): { start: number; query:
   const before = text.slice(0, cursor);
   const m = /(^|\s)@([^\s]*)$/.exec(before);
   return m ? { start: before.length - m[2]!.length - 1, query: m[2]! } : null;
+}
+
+/** The `/command` token being typed at the start of the prompt when the cursor is inside it. */
+export function slashAt(text: string, cursor: number): { start: number; query: string } | null {
+  const before = text.slice(0, cursor);
+  const m = /^\/([^\s]*)$/.exec(before);
+  if (!m) return null;
+  // Only complete while still on the command name (before any whitespace).
+  if (/\s/.test(text.slice(cursor))) return null;
+  return { start: 0, query: m[1]! };
 }

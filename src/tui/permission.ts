@@ -43,7 +43,7 @@ export function askPermission(app: App, req: acp.RequestPermissionRequest, known
       const reason = tool.title && tool.title !== arg && !tool.title.endsWith(arg) ? tool.title : "";
       if (tool.kind === "execute") {
         nodes.push(line(fg(th.fg)(`Run a command in ${tildify(cwd)}`), reason ? fg(th.fgMuted)(` · ${reason}`) : ""));
-        const cmd = new BoxRenderable(renderer, { flexShrink: 0, marginTop: 1 });
+        const cmd = new BoxRenderable(renderer, { flexShrink: 0, marginTop: 1, border: ["left"], borderStyle: "single", borderColor: th.separatorSubtle, paddingLeft: 1 });
         cmd.add(new TextRenderable(renderer, { content: styled(fg(th.fgMuted)("$ "), fg(th.fg)(arg)), flexShrink: 1 }));
         nodes.push(cmd);
       } else {
