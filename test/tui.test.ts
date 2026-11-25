@@ -94,7 +94,7 @@ test(
     expect(screen).not.toMatch(/thought \d|tools \d/);
     expect(screen).toContain("copy");
     const contextLine = screen.split("\n").find((line) => line.includes("ctx ") && line.includes("12%"));
-    expect(contextLine?.trimEnd()).toMatch(/ctx .*12%$/);
+    expect(contextLine?.trimEnd()).toMatch(/ctx \[.*12%.*\]$/);
     expect(contextLine).not.toContain("15.4k/128k");
     // ctrl+d expands the folded turn and reveals tool output
     keys().pressKey("d", { ctrl: true });

@@ -253,12 +253,15 @@ export function createChrome(app: App) {
     const usage = conv.usage;
     if (usage?.size && pct !== null) {
       const barW = narrow ? 8 : 14;
-      const filled = Math.max(0, Math.min(barW, Math.round((pct / 100) * barW)));
+      const label = `${pct}%`;
+      const trackW = barW - label.length - 1;
+      const filled = Math.max(0, Math.min(trackW, Math.round((pct / 100) * trackW)));
       statusContext.content = styled(
-        fg(th.fgGutter)("ctx "),
-        fg(pct >= 80 ? th.warning : th.primary)("━".repeat(filled)),
-        fg(th.separatorSubtle)("━".repeat(barW - filled)),
-        fg(th.fgDim)(` ${pct}%`),
+        fg(th.fgGutter)("ctx ["),
+        fg(pct >= 80 ? th.warning : th.primary)("█".repeat(filled)),
+        fg(th.fgDim)(` ${label}`),
+        fg(th.separatorSubtle)("░".repeat(trackW - filled)),
+        fg(th.fgGutter)("]"),
       );
     }
   }
