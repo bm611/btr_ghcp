@@ -83,12 +83,13 @@ test(
     // The turn folds once it ends.
     screen = await screenUntil((s) => s.includes("tool calls"));
     expect(screen).toContain("That's all.");
-    expect(screen).toMatch(/▸ ⚙ 3 tool calls\s+≡ 1\s+\$ 1\s+✎ 1/);
+    expect(screen).toContain("▸ 3 tool calls (1 read, 1 bash, 1 edit)");
     expect(screen).toContain("+3 -2");
     expect(screen).toContain("src/greet.ts");
     expect(screen).toContain("copy");
-    const contextLine = screen.split("\n").find((line) => line.includes("15.4k/128k 12%"));
-    expect(contextLine?.trimEnd().endsWith("15.4k/128k 12%")).toBe(true);
+    const contextLine = screen.split("\n").find((line) => line.includes("ctx ") && line.includes("12%"));
+    expect(contextLine?.trimEnd()).toMatch(/ctx .*12%$/);
+    expect(contextLine).not.toContain("15.4k/128k");
   },
   TIMEOUT,
 );

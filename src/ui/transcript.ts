@@ -21,20 +21,20 @@ import { styled, todoLine, toneColor, toneGlyph, type Tone } from "./text";
 import { G, type Theme } from "./theme";
 
 /**
- * How each kind of tool call reads (by the name `toolHeader` gives it): the verbs fx writes
- * before its target, present tense while it runs and past once done, and the one-cell icon
- * a folded turn counts it under. Calls with other names count under the gear.
+ * How each kind of tool call reads (by the name `toolHeader` gives it): the verbs shown
+ * before its target (present while running, past once done) and its plain-word label
+ * in a folded turn summary.
  */
-const TOOLS: Record<string, { verbs: [string, string]; icon: string }> = {
-  Bash: { verbs: ["Running", "Ran"], icon: G.shell },
-  Read: { verbs: ["Reading", "Read"], icon: G.read },
-  Search: { verbs: ["Searching", "Searched"], icon: G.search },
-  Update: { verbs: ["Editing", "Edited"], icon: G.edit },
-  Write: { verbs: ["Writing", "Wrote"], icon: G.write },
-  Delete: { verbs: ["Deleting", "Deleted"], icon: G.del },
-  Move: { verbs: ["Moving", "Moved"], icon: G.move },
-  Fetch: { verbs: ["Fetching", "Fetched"], icon: G.fetch },
-  Think: { verbs: ["Thinking", "Thought"], icon: G.thought },
+const TOOLS: Record<string, { verbs: [string, string]; label: string }> = {
+  Bash: { verbs: ["Running", "Ran"], label: "bash" },
+  Read: { verbs: ["Reading", "Read"], label: "read" },
+  Search: { verbs: ["Searching", "Searched"], label: "search" },
+  Update: { verbs: ["Editing", "Edited"], label: "edit" },
+  Write: { verbs: ["Writing", "Wrote"], label: "write" },
+  Delete: { verbs: ["Deleting", "Deleted"], label: "delete" },
+  Move: { verbs: ["Moving", "Moved"], label: "move" },
+  Fetch: { verbs: ["Fetching", "Fetched"], label: "fetch" },
+  Think: { verbs: ["Thinking", "Thought"], label: "think" },
 };
 
 export function toolVerb(name: string, status: ToolState["status"]): string {
@@ -352,6 +352,16 @@ export class Transcript {
     }
   }
 
+  /** Compact `+added -removed` chunks, omitting zero counts. */
+  private diffStats(added: number, removed: number): TextChunk[] {
+    const th = this.ctx.theme();
+    const out: TextChunk[] = [];
+    if (added) out.push(fg(th.diffAddedFg)(`+${added}`));
+    if (added && removed) out.push(fg(th.fgGutter)(" "));
+    if (removed) out.push(fg(th.diffRemovedFg)(`-${removed}`));
+    return out;
+  }
+
   diffView(patch: string, wrap = this._diffWrap) {
     const th = this.ctx.theme();
     return new DiffRenderable(this.renderer, {
@@ -404,15 +414,15 @@ export class Transcript {
 
     switch (item.type) {
       case "group": {
-        // "▸ ⚙ 3 tool calls  ≡ 1  $ 1  ✎ 1  +3 -2  ∴ 2s · click or ctrl+d to expand"
+        // "▸ 3 tool calls (1 read, 1 bash, 1 edit)  +3 -2  src/greet.ts  thought 2s · ctrl+d or click"
         const open = item.expanded || verbose;
         const tools = item.members.flatMap((m) => (m.item.type === "tool" ? [m.item.tool] : []));
         const counts = new Map<string, number>();
         const touched = new Map<string, { added: number; removed: number }>();
         let totalMs = 0;
         for (const t of tools) {
-          const icon = TOOLS[toolHeader(t, this.ctx.cwd).name]?.icon ?? G.tools;
-          counts.set(icon, (counts.get(icon) ?? 0) + 1);
+          const label = TOOLS[toolHeader(t, this.ctx.cwd).name]?.label ?? "other";
+          counts.set(label, (counts.get(label) ?? 0) + 1);
           if (t.startedAt !== undefined && t.endedAt !== undefined) totalMs += Math.max(0, t.endedAt - t.startedAt);
           for (const c of toolFileChanges(t, this.ctx.cwd)) {
             const cur = touched.get(c.path) ?? { added: 0, removed: 0 };
@@ -428,25 +438,42 @@ export class Transcript {
         const netRemoved = [...touched.values()].reduce((n, f) => n + f.removed, 0);
 
         const chunks: TextChunk[] = [fg(th.fgDim)(`${open ? G.open : G.closed} `)];
-        const stat = (icon: string, value: string, color = th.fgSubtle) => {
-          if (chunks.length > 1) chunks.push(fg(th.fgGutter)("  "));
-          chunks.push(fg(th.fgDim)(icon + " "), fg(color)(value));
+        const sep = () => {
+          if (chunks.length > 1) chunks.push(fg(th.fgGutter)(" · "));
         };
-        if (tools.length) stat(G.tools, `${tools.length} tool call${tools.length === 1 ? "" : "s"}`, th.fg);
-        // Most used first; a single kind is already said by the total.
-        if (counts.size > 1) for (const [icon, n] of [...counts].sort((a, b) => b[1] - a[1])) stat(icon, String(n));
-        if (failed.length) stat(G.fail, `${failed.length} failed`, th.error);
+        if (tools.length) {
+          chunks.push(fg(th.fg)(`${tools.length} tool call${tools.length === 1 ? "" : "s"}`));
+          const breakdown = [...counts]
+            .sort((a, b) => b[1] - a[1])
+            .map(([label, n]) => (tools.length === 1 ? label : `${n} ${label}`))
+            .join(", ");
+          chunks.push(fg(th.fgDim)(` (${breakdown})`));
+        }
+        if (failed.length) {
+          sep();
+          chunks.push(fg(th.error)(`${failed.length} failed`));
+        }
         if (netAdded || netRemoved) {
-          chunks.push(fg(th.fgGutter)("  "), fg(th.diffAddedFg)(`+${netAdded}`), fg(th.fgGutter)(" "), fg(th.diffRemovedFg)(`-${netRemoved}`));
+          sep();
+          chunks.push(...this.diffStats(netAdded, netRemoved));
         }
-        if (hasThought) stat(G.thought, thought >= 1000 ? formatDuration(thought) : "thought");
-        if (totalMs >= 1000) chunks.push(fg(th.fgGutter)("  "), fg(th.fgDim)(formatDuration(totalMs)));
         if (!open && touched.size) {
+          sep();
           const paths = [...touched.keys()];
-          const label = paths.length === 1 ? truncStart(paths[0]!, 24) : `${paths.length} files`;
-          chunks.push(fg(th.fgGutter)("  "), fg(th.fgMuted)(label));
+          chunks.push(fg(th.fgMuted)(paths.length === 1 ? truncStart(paths[0]!, 24) : `${paths.length} files`));
         }
-        if (!verbose) chunks.push(fg(th.fgGutter)(open ? "  click to fold" : "  click or ctrl+d to expand"));
+        if (hasThought) {
+          sep();
+          chunks.push(fg(th.fgDim)(thought >= 1000 ? `thought ${formatDuration(thought)}` : "thought"));
+        }
+        if (totalMs >= 1000) {
+          sep();
+          chunks.push(fg(th.fgDim)(`tools ${formatDuration(totalMs)}`));
+        }
+        if (!verbose) {
+          sep();
+          chunks.push(fg(th.fgGutter)(open ? "click to fold" : "ctrl+d or click"));
+        }
 
         const header = this.text(styled(...chunks), th.fgDim, { flexShrink: 1, wrapMode: "none", truncate: true });
         header.onMouseDown = () => this.toggle(entry as Entry<Extract<Item, { type: "group" }>>);
@@ -552,7 +579,7 @@ export class Transcript {
 
         const meta: TextChunk[] = [];
         if (metrics.added || metrics.removed) {
-          meta.push(fg(th.fgGutter)("  "), fg(th.diffAddedFg)(`+${metrics.added}`), fg(th.fgGutter)(" "), fg(th.diffRemovedFg)(`-${metrics.removed}`));
+          meta.push(fg(th.fgGutter)("  "), ...this.diffStats(metrics.added, metrics.removed));
         } else if (tool.status === "completed" && !summary && metrics.lines > 0) {
           meta.push(fg(th.fgGutter)(`  ${metrics.lines} line${metrics.lines === 1 ? "" : "s"}`));
         } else if (tool.status === "completed" && name === "Fetch" && metrics.bytes > 0) {
@@ -628,13 +655,13 @@ export class Transcript {
       }
 
       case "footer": {
-        const color = item.tone === "dim" || !item.tone ? th.fgGutter : toneColor(th, item.tone);
+        const color = item.tone === "dim" || !item.tone ? th.fgFaint : toneColor(th, item.tone);
         if (!item.replyText || !this.ctx.onCopy) {
           return this.text(styled(fg(color)(item.text)), color, { flexShrink: 1 });
         }
         const row = new BoxRenderable(this.renderer, { flexDirection: "row", flexShrink: 0 });
         row.add(this.text(styled(fg(color)(item.text)), color, { flexShrink: 1 }));
-        const copyBtn = this.text(styled(fg(th.fgGutter)("  ·  copy")), th.fgGutter, { flexShrink: 0 });
+        const copyBtn = this.text(styled(fg(th.fgGutter)("  ·  "), fg(th.fgDim)("copy")), th.fgDim, { flexShrink: 0 });
         const text = item.replyText;
         copyBtn.onMouseDown = () => this.ctx.onCopy?.(text);
         row.add(copyBtn);
@@ -653,8 +680,7 @@ export class Transcript {
           styled(
             fg(th.fgDim)((collapsed ? G.closed : G.open) + " "),
             bold(fg(th.fg)(file)),
-            fg(th.diffAddedFg)(`  +${added}`),
-            fg(th.diffRemovedFg)(` -${removed}`),
+            ...(added || removed ? [fg(th.fgGutter)("  "), ...this.diffStats(added, removed)] : []),
             fg(th.fgGutter)(this._diffWrap ? "  [wrap]" : ""),
           ),
           th.fg,

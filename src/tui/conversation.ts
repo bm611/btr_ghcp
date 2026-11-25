@@ -256,7 +256,7 @@ export function createConversation(app: App) {
     if (disconnected) return void note("The agent is not connected.", "error");
     const desc = app.attachments.describe(prompt);
     const attached = [
-      ...desc.mentions.map((m) => `@${m}`),
+      ...desc.mentions.filter((m) => !prompt.includes(`@${m}`)).map((m) => `@${m}`),
       ...desc.images.map((im) => `[Image #${im.id}]`),
     ];
     const asked = transcript.add({

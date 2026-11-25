@@ -94,7 +94,7 @@ export function createChrome(app: App) {
     const { input } = view;
     input.textColor = th.info;
     input.focusedTextColor = th.info;
-    input.placeholderColor = th.fgGutter;
+    input.placeholderColor = th.fgFaint;
     input.cursorColor = th.mono ? th.fg : th.secondary;
     input.selectionBg = th.primary;
     input.selectionFg = th.onPrimary;
@@ -128,7 +128,7 @@ export function createChrome(app: App) {
   function modeColor(mode: string) {
     const th = app.look.th;
     const m = mode.toLowerCase();
-    return m.includes("plan") ? th.plan : m.includes("auto") ? th.yolo : th.fg;
+    return m.includes("plan") ? th.plan : m.includes("auto") ? (th.mono ? th.fg : th.secondary) : th.fg;
   }
 
   function drawSidebar() {
@@ -252,7 +252,14 @@ export function createChrome(app: App) {
     const pct = conv.contextPct();
     const usage = conv.usage;
     if (usage?.size && pct !== null) {
-      statusContext.content = styled(fg(pct >= 80 ? th.warning : th.fgDim)(`${formatTokens(usage.used)}/${formatTokens(usage.size)} ${pct}%`));
+      const barW = narrow ? 8 : 14;
+      const filled = Math.max(0, Math.min(barW, Math.round((pct / 100) * barW)));
+      statusContext.content = styled(
+        fg(th.fgGutter)("ctx "),
+        fg(pct >= 80 ? th.warning : th.primary)("━".repeat(filled)),
+        fg(th.separatorSubtle)("━".repeat(barW - filled)),
+        fg(th.fgDim)(` ${pct}%`),
+      );
     }
   }
 
