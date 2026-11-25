@@ -4,6 +4,13 @@ A terminal UI for GitHub Copilot and other agents that support the Agent Client 
 
 btr launches an ACP agent in the current directory and displays the session. The agent handles the work—including tools, MCP servers, skills and compaction—while btr acts as the client.
 
+## Recent changes
+
+- **Refactored the codebase** (2026-11-21): split the application into focused `agent/`, `core/`, `ui/`, and `tui/` modules instead of the previous monolithic `agent.ts` and `tui.ts` files.
+- Added dedicated CLI, agent, core, UI, settings, and TUI test coverage.
+- Added modular Copilot configuration support and a headless CLI entry point.
+- Updated the demo and architecture documentation for the new layout.
+
 ## Requirements
 
 - Bun 1.3.14 or newer
