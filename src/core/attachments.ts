@@ -20,12 +20,15 @@ const PASTE_RE = /\[Pasted text #(\d+)(?: \+\d+ lines)?\]/g;
 const IMAGE_RE = /\[Image #(\d+)\]/g;
 const MENTION_RE = /(^|\s)@("[^"]+"|[^\s]+)/g;
 
+/** The path an `@` mention names: its quotes and any trailing punctuation dropped. */
+const mentionPath = (raw: string) => raw.replace(/^"(.*)"$/, "$1").replace(/[.,;:!?)]+$/, "");
+
 /**
  * What a prompt carries besides its typed text: long pastes folded into
  * placeholders, images, and files mentioned with `@`.
  */
 export class Attachments {
-  private pastes = new Map<number, string>();
+  private pastes = new Map<number, { text: string; lines: number }>();
   private images = new Map<number, { data: string; mimeType: string }>();
   private nextPaste = 1;
   private nextImage = 1;
@@ -35,7 +38,7 @@ export class Attachments {
     const lines = text.split("\n").length;
     if (lines <= PASTE_LINES && text.length <= PASTE_CHARS) return text;
     const id = this.nextPaste++;
-    this.pastes.set(id, text);
+    this.pastes.set(id, { text, lines });
     return `[Pasted text #${id} +${lines} lines]`;
   }
 
@@ -68,7 +71,7 @@ export class Attachments {
   async blocks(text: string, cwd: string, canImage: boolean): Promise<acp.ContentBlock[]> {
     const images: acp.ContentBlock[] = [];
     const body = text
-      .replace(PASTE_RE, (whole, id) => this.pastes.get(Number(id)) ?? whole)
+      .replace(PASTE_RE, (whole, id) => this.pastes.get(Number(id))?.text ?? whole)
       .replace(IMAGE_RE, (whole, id) => {
         const img = this.images.get(Number(id));
         if (!img || !canImage) return whole;
@@ -79,7 +82,7 @@ export class Attachments {
     const links: acp.ContentBlock[] = [];
     const seen = new Set<string>();
     for (const m of body.matchAll(MENTION_RE)) {
-      const rel = m[2]!.replace(/^"(.*)"$/, "$1").replace(/[.,;:!?)]+$/, "");
+      const rel = mentionPath(m[2]!);
       const abs = resolve(cwd, rel);
       if (seen.has(abs)) continue;
       const info = await stat(abs).catch(() => null);
@@ -97,10 +100,10 @@ export class Attachments {
     for (const m of text.matchAll(PASTE_RE)) {
       const id = Number(m[1]);
       if (seenPaste.has(id)) continue;
-      const body = this.pastes.get(id);
-      if (body === undefined) continue;
+      const paste = this.pastes.get(id);
+      if (!paste) continue;
       seenPaste.add(id);
-      pastes.push({ id, lines: body.split("\n").length });
+      pastes.push({ id, lines: paste.lines });
     }
     const images: { id: number; mimeType: string }[] = [];
     const seenImage = new Set<number>();
@@ -115,7 +118,7 @@ export class Attachments {
     const mentions: string[] = [];
     const seenMention = new Set<string>();
     for (const m of text.matchAll(MENTION_RE)) {
-      const rel = m[2]!.replace(/^"(.*)"$/, "$1").replace(/[.,;:!?)]+$/, "");
+      const rel = mentionPath(m[2]!);
       if (!rel || seenMention.has(rel)) continue;
       seenMention.add(rel);
       mentions.push(rel);

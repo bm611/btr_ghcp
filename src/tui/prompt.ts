@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mentionAt, slashAt } from "../core/attachments";
 import { listFiles } from "../core/files";
-import { trunc, truncStart } from "../core/format";
+import { firstSentence, truncStart } from "../core/format";
 import { fuzzyFilter, fuzzyMatch } from "../core/fuzzy";
 import { highlightMatches, styled } from "../ui/text";
 import { G } from "../ui/theme";
@@ -105,8 +105,7 @@ export function createPrompt(app: App) {
     for (const c of app.conversation.commands) {
       if (seen.has(c.name)) continue;
       seen.add(c.name);
-      const hint = c.description.split(/\.\s/)[0]!.replace(/\.$/, "");
-      out.push({ label: `/${c.name}`, hint: trunc(hint, 32), insert: `/${c.name}${c.input ? " " : ""}` });
+      out.push({ label: `/${c.name}`, hint: firstSentence(c.description, 32), insert: `/${c.name}${c.input ? " " : ""}` });
     }
     return out;
   }
@@ -304,8 +303,8 @@ export function createPrompt(app: App) {
     app.chrome.flash("Moved queued message back to prompt");
   }
 
-  function dropQueued(index?: number) {
-    const popped = app.conversation.popQueue(index);
+  function dropQueued() {
+    const popped = app.conversation.popQueue();
     if (popped === undefined) return;
     app.chrome.flash("Dropped queued message");
   }

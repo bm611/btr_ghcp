@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { AGENT_LOG } from "../agent/connection";
 import { choices } from "../agent/config-options";
 import { copyText } from "../core/clipboard";
-import { errorText, formatDuration, formatTokens, oneLine, tildify, trunc } from "../core/format";
-import { toolHeader } from "../core/tools";
+import { errorText, firstSentence, formatCost, formatDuration, formatTokens, oneLine, tildify } from "../core/format";
+import { patchFile, toolHeader } from "../core/tools";
 import type { MenuOption } from "../ui/menu";
 import { hatchedTitle, styled } from "../ui/text";
 import { themes } from "../ui/theme";
@@ -139,7 +139,7 @@ export function createCommands(app: App) {
     const options: MenuOption[] = list.map((c) => ({ label: c.label, value: `action:${c.id}`, hint: c.key ?? c.hint, tab: "System" }));
     for (const c of agentCommands) {
       if (bySlash(c.name)) continue;
-      options.push({ label: `/${c.name}`, value: `agent:${c.name}`, hint: trunc(c.description.split(/\.\s/)[0]!.replace(/\.$/, ""), 40), tab: "Agent" });
+      options.push({ label: `/${c.name}`, value: `agent:${c.name}`, hint: firstSentence(c.description, 40), tab: "Agent" });
     }
     const value = await app.menus.open({
       title: "Commands",
@@ -244,7 +244,7 @@ export function createCommands(app: App) {
       ["Turns", String(turns)],
       ...contextRow(),
     ];
-    if (usage?.cost) rows.push(["Cost", `${usage.cost.amount.toFixed(4)} ${usage.cost.currency}`]);
+    if (usage?.cost) rows.push(["Cost", formatCost(usage.cost)]);
     const missing = app.conversation.agentHas("usage") ? "The agent has not reported usage yet; its /usage command asks it." : "The agent has not reported usage yet.";
     infoBlock("Usage", rows, usage ? "" : missing);
   }
@@ -268,73 +268,48 @@ export function createCommands(app: App) {
   }
 
   async function showDiff() {
-    const proc = Bun.spawn(["git", "diff", "HEAD"], { cwd: app.cwd, stdout: "pipe", stderr: "pipe" });
-    const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-    if ((await proc.exited) !== 0) return flash(err.trim().split("\n")[0] || "git diff failed", "warning");
-    const files = out.split(/^(?=diff --git )/m).filter((f) => f.trim());
+    const res = await Bun.$`git diff HEAD`.cwd(app.cwd).quiet().nothrow();
+    if (res.exitCode !== 0) return flash(res.stderr.toString().trim().split("\n")[0] || "git diff failed", "warning");
+    const files = res.stdout.toString().split(/^(?=diff --git )/m).filter((f) => f.trim());
     if (!files.length) return flash("No uncommitted changes");
     for (const patch of files.slice(0, 30)) transcript.add({ type: "diff", patch });
     if (files.length > 30) transcript.note(`${files.length - 30} more files changed`);
   }
 
-  async function pickTheme(args: string) {
+  /**
+   * Picks a setting from a list, previewing each option as the cursor moves and putting
+   * the old value back on cancel. `args` sets it directly.
+   */
+  async function pickSetting<K extends "theme" | "markdown">(key: K, title: string, noun: string, options: MenuOption[], apply: () => void, args: string) {
+    const prev = settings[key];
+    const preview = (v: string | null) => {
+      const next = (v ?? prev) as Settings[K];
+      if (settings[key] === next) return;
+      settings[key] = next;
+      apply();
+    };
+    const value = args || (await app.menus.open({ title, options, initial: options.findIndex((o) => o.value === prev), onPreview: preview }));
+    if (!value) return preview(null);
+    if (!options.some((o) => o.value === value)) return flash(`Unknown ${noun} "${value}"`, "warning");
+    settings[key] = value as Settings[K];
+    await saveSettings(settings);
+    apply();
+  }
+
+  function pickTheme(args: string) {
     const options: MenuOption[] = [
       { label: "Auto", value: "auto", hint: "fx, light or dark by the terminal" },
       ...Object.values(themes).map((t) => ({ label: t.label, value: t.name, hint: t.hint })),
     ];
-    const names = options.map((o) => o.value);
-    const prev = settings.theme;
-    const preview = (v: string | null) => {
-      const next = (v ?? prev) as Settings["theme"];
-      if (settings.theme === next) return;
-      settings.theme = next;
-      app.chrome.applyTheme();
-    };
-    const value =
-      args ||
-      (await app.menus.open({
-        title: "Themes",
-        options,
-        initial: names.indexOf(prev),
-        onPreview: preview,
-      }));
-    if (!value) {
-      preview(null);
-      return;
-    }
-    if (!names.includes(value)) return flash(`Unknown theme "${value}"`, "warning");
-    settings.theme = value as Settings["theme"];
-    await saveSettings(settings);
-    app.chrome.applyTheme();
+    return pickSetting("theme", "Themes", "theme", options, () => app.chrome.applyTheme(), args);
   }
 
-  async function pickMarkdownStyle(args: string) {
-    const prev = settings.markdown;
-    const preview = (v: string | null) => {
-      const next = (v ?? prev) as Settings["markdown"];
-      if (settings.markdown === next) return;
-      settings.markdown = next;
-      transcript.rebuild();
-    };
-    const value =
-      args ||
-      (await app.menus.open({
-        title: "Markdown Style",
-        options: [
-          { label: "Glow", value: "glow", hint: "glow's colors and headings" },
-          { label: "btr", value: "btr", hint: "the theme's colors" },
-        ],
-        initial: prev === "glow" ? 0 : 1,
-        onPreview: preview,
-      }));
-    if (!value) {
-      preview(null);
-      return;
-    }
-    if (value !== "glow" && value !== "btr") return flash(`Unknown markdown style "${value}"`, "warning");
-    settings.markdown = value;
-    await saveSettings(settings);
-    transcript.rebuild();
+  function pickMarkdownStyle(args: string) {
+    const options: MenuOption[] = [
+      { label: "Glow", value: "glow", hint: "glow's colors and headings" },
+      { label: "btr", value: "btr", hint: "the theme's colors" },
+    ];
+    return pickSetting("markdown", "Markdown Style", "markdown style", options, () => transcript.rebuild(), args);
   }
 
   function toggleDiffWrap() {
@@ -354,8 +329,7 @@ export function createCommands(app: App) {
         const { name, arg } = toolHeader(it.tool, app.cwd);
         options.push({ label: `${name}${arg ? ` ${arg}` : ""}`, value: String(i), hint: "tool" });
       } else if (it.type === "diff") {
-        const file = /^\+\+\+ (?:b\/)?(.+)$/m.exec(it.patch)?.[1]?.trim() ?? "diff";
-        options.push({ label: file, value: String(i), hint: "diff" });
+        options.push({ label: patchFile(it.patch) ?? "diff", value: String(i), hint: "diff" });
       }
     });
     if (!options.length) return flash("Nothing in the transcript yet");

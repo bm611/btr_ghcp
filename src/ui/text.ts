@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import { StyledText, type TextChunk, bold, fg, strikethrough } from "@opentui/core";
+import { type Renderable, StyledText, type TextChunk, bold, fg, strikethrough } from "@opentui/core";
 import { G, type Theme } from "./theme";
 
 /** How a message reads: its color and the mark before it. */
@@ -69,19 +69,17 @@ export function hatchedTitle(th: Theme, title: string, width: number, trailing =
   ];
 }
 
-/** A thin rule that fills `width` cells, for section separators. */
-export function rule(th: Theme, width: number): TextChunk[] {
-  return [fg(th.separatorSubtle)(G.rule.repeat(Math.max(0, width)))];
+/** A section's name, then a thin rule out to `width` cells. */
+export function sectionTitle(th: Theme, name: string, width: number): TextChunk[] {
+  return [bold(fg(th.fgDim)(name)), fg(th.separatorSubtle)(" " + G.rule.repeat(Math.max(0, width - name.length - 1)))];
 }
 
-/** Key-value pair styled for info blocks: the key dim, the value bright. */
-export function kv(th: Theme, key: string, value: string, keyWidth: number): TextChunk[] {
-  return [fg(th.fgMuted)(key.padEnd(keyWidth)), fg(th.fg)(value)];
-}
-
-/** A label with a dot prefix, used for section headers in the transcript. */
-export function sectionLabel(th: Theme, text: string): TextChunk[] {
-  return [fg(th.fgDim)(G.dot + " "), bold(fg(th.fg)(text))];
+/** Removes and destroys every child of `node`. */
+export function clearChildren(node: Renderable) {
+  for (const c of node.getChildren()) {
+    node.remove(c);
+    c.destroyRecursively();
+  }
 }
 
 /** Renders `text` with characters at `indices` highlighted in `matchColor` (bold). */

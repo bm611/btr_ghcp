@@ -1,6 +1,7 @@
 /** Things only GitHub Copilot's agent provides, read from the files it keeps. */
 
-const COPILOT_HOME = process.env.COPILOT_HOME ?? `${process.env.HOME}/.copilot`;
+/** Where Copilot keeps its settings, instructions and session logs. */
+export const COPILOT_HOME = process.env.COPILOT_HOME ?? `${process.env.HOME}/.copilot`;
 
 /**
  * The display name of the model Copilot's "auto" routing picked for this session's latest

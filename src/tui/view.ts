@@ -2,7 +2,6 @@ import { BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable, T
 
 /** Rows of @ or / completions shown at once. */
 export const MAX_COMPLETIONS = 8;
-export const SIDEBAR_WIDTH = 36;
 
 export type View = ReturnType<typeof createView>;
 
@@ -120,7 +119,8 @@ export function createView(renderer: CliRenderer) {
   const sidebar = new BoxRenderable(renderer, {
     flexDirection: "column",
     flexShrink: 0,
-    width: SIDEBAR_WIDTH,
+    // chrome.ts sizes it to the window.
+    width: 36,
     border: ["left"],
     paddingX: 1,
     paddingTop: 1,
@@ -174,7 +174,6 @@ export function createView(renderer: CliRenderer) {
     promptMark,
     input,
     sidebar,
-    sidebarScroll,
     sidebarHead,
     sidebarFiles,
     sidebarFoot,

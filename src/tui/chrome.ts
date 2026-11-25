@@ -1,12 +1,16 @@
 import { TextRenderable, type TextChunk, bold, fg } from "@opentui/core";
 import { choices } from "../agent/config-options";
-import { formatDuration, formatTokens, tildify, trunc, truncStart } from "../core/format";
-import { hatchedTitle, styled, todoLine, toneColor, toneGlyph, type Tone } from "../ui/text";
+import { firstLine, formatCost, formatDuration, formatTokens, tildify, trunc, truncStart } from "../core/format";
+import { sumByPath } from "../core/tools";
+import { blend, clearChildren, hatchedTitle, sectionTitle, styled, todoLine, toneColor, toneGlyph, type Tone } from "../ui/text";
 import { G } from "../ui/theme";
 import type { App } from "./app";
 import { HELP_FOOTER, HELP_KEYS } from "./keys";
 import { MODES } from "./modes";
 import { saveSettings } from "./settings";
+
+/** How many of `width` cells a `pct` percent bar fills. */
+const barFill = (pct: number, width: number) => Math.max(0, Math.min(width, Math.round((pct / 100) * width)));
 
 /** Narrower windows hide the sidebar. */
 const SIDEBAR_MIN_WINDOW = 100;
@@ -32,7 +36,7 @@ export function createChrome(app: App) {
   let hasUnread = false;
 
   // The start page has the window to itself.
-  const sidebarShown = () => settings.sidebar && renderer.width >= SIDEBAR_MIN_WINDOW && !app.dashboard?.shown;
+  const sidebarShown = () => settings.sidebar && renderer.width >= SIDEBAR_MIN_WINDOW && !app.dashboard.shown;
   const sidebarWidth = () => Math.min(38, Math.max(28, Math.floor(renderer.width * 0.28)));
 
   const isScrolledUp = () => {
@@ -80,7 +84,7 @@ export function createChrome(app: App) {
 
   function setTitle() {
     const { sessionTitle, busy } = app.conversation;
-    const name = sessionTitle ? sessionTitle.split("\n")[0]!.slice(0, 60) : tildify(app.cwd);
+    const name = sessionTitle ? firstLine(sessionTitle, 60) : tildify(app.cwd);
     renderer.setTerminalTitle(`${busy ? G.diamond : G.model} ${name}`);
   }
 
@@ -124,7 +128,7 @@ export function createChrome(app: App) {
     drawQueue();
     drawHelp();
     drawStatus();
-    app.dashboard?.draw();
+    app.dashboard.draw();
   }
 
   function modeColor(mode: string) {
@@ -140,14 +144,14 @@ export function createChrome(app: App) {
     const w = sidebarWidth() - 3;
     const section = (parts: (TextChunk | string)[], name: string) => {
       parts.push("\n");
-      parts.push(bold(fg(th.fgDim)(name)), fg(th.separatorSubtle)(" " + G.rule.repeat(Math.max(0, w - name.length - 1))), "\n");
+      parts.push(...sectionTitle(th, name, w), "\n");
     };
 
     const head: (TextChunk | string)[] = [];
     const line = (parts: (TextChunk | string)[], ...c: (TextChunk | string)[]) => parts.push(...c, "\n");
     line(head, ...hatchedTitle(th, "btr", w));
     head.push("\n");
-    line(head, bold(fg(th.fg)(trunc((conv.sessionTitle || "New Session").split("\n")[0]!, w))));
+    line(head, bold(fg(th.fg)(firstLine(conv.sessionTitle || "New Session", w))));
     line(head, fg(th.fgMuted)(truncStart(tildify(app.cwd), w)));
 
     section(head, "Agent");
@@ -158,26 +162,16 @@ export function createChrome(app: App) {
     const usage = conv.usage;
     if (pct !== null && usage) {
       const barW = w - 2;
-      const filled = Math.max(0, Math.min(barW, Math.round((pct / 100) * barW)));
+      const filled = barFill(pct, barW);
       line(head, "  ", fg(pct >= 80 ? th.warning : th.primary)("━".repeat(filled)), fg(th.separatorSubtle)("━".repeat(barW - filled)));
       line(head, fg(th.fgDim)(`  ${pct}% · ${formatTokens(usage.used)} / ${formatTokens(usage.size)} tokens`));
-      if (usage.cost) line(head, fg(th.fgDim)(`  ${usage.cost.amount.toFixed(4)} ${usage.cost.currency}`));
+      if (usage.cost) line(head, fg(th.fgDim)(`  ${formatCost(usage.cost)}`));
     }
     section(head, "Modified Files");
     view.sidebarHead.content = styled(...head.slice(0, -1));
 
-    for (const c of view.sidebarFiles.getChildren()) {
-      view.sidebarFiles.remove(c);
-      c.destroyRecursively();
-    }
-    const files = new Map<string, { added: number; removed: number }>();
-    for (const list of conv.changes.values())
-      for (const c of list) {
-        const f = files.get(c.path) ?? { added: 0, removed: 0 };
-        f.added += c.added;
-        f.removed += c.removed;
-        files.set(c.path, f);
-      }
+    clearChildren(view.sidebarFiles);
+    const files = sumByPath([...conv.changes.values()].flat());
     if (!files.size) {
       view.sidebarFiles.add(new TextRenderable(renderer, { content: "None", fg: th.fgGutter, flexShrink: 0 }));
     } else {
@@ -257,7 +251,7 @@ export function createChrome(app: App) {
       const barW = narrow ? 8 : 14;
       const label = `${pct}%`;
       const trackW = barW - label.length - 1;
-      const filled = Math.max(0, Math.min(trackW, Math.round((pct / 100) * trackW)));
+      const filled = barFill(pct, trackW);
       statusContext.content = styled(
         fg(th.fgGutter)("ctx ["),
         fg(pct >= 80 ? th.warning : th.primary)("█".repeat(filled)),
@@ -307,10 +301,7 @@ export function createChrome(app: App) {
   function drawQueue() {
     const th = app.look.th;
     const { queue } = app.conversation;
-    for (const c of view.queued.getChildren()) {
-      view.queued.remove(c);
-      c.destroyRecursively();
-    }
+    clearChildren(view.queued);
     view.queued.visible = queue.length > 0;
     if (!queue.length) return;
     queue.forEach((q, i) => {
@@ -344,12 +335,10 @@ export function createChrome(app: App) {
     const period = chars.length + 20;
     const at = (spinTick % period) - 6;
     const bandWidth = 5;
-    const shimmer = chars.map((ch, i) => {
-      const dist = Math.abs(i - at);
-      const t = Math.min(1, dist / bandWidth);
-      // Smooth falloff: the center is brightest, edges fade to faint.
-      return fg(blendColor(th.fg, th.fgFaint, t * t))(ch);
-    });
+    // Smooth falloff: the center is brightest, edges fade to faint. Distances are whole
+    // cells, so there are only bandWidth + 1 shades.
+    const shades = Array.from({ length: bandWidth + 1 }, (_, d) => blend(th.fg, th.fgFaint, (d / bandWidth) ** 2));
+    const shimmer = chars.map((ch, i) => fg(shades[Math.min(bandWidth, Math.abs(i - at))]!)(ch));
     const info = [`(${formatDuration(Date.now() - turn.since)})`];
     const tokens = Math.round(turn.chars / 4);
     if (tokens > 0) info.push(`(↓${formatTokens(tokens)})`);
@@ -426,4 +415,3 @@ export function createChrome(app: App) {
   };
 }
 
-import { blend as blendColor } from "../ui/text";

@@ -1,7 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { TextRenderable, type TextChunk, bg, bold, fg } from "@opentui/core";
-import { tildify, timeAgo, trunc, truncStart } from "../core/format";
-import { blend, styled } from "../ui/text";
+import { sessionLabel, tildify, timeAgo, trunc, truncStart } from "../core/format";
+import { blend, clearChildren, gradient, sectionTitle, styled } from "../ui/text";
 import { G } from "../ui/theme";
 import { VERSION } from "../version";
 import type { App } from "./app";
@@ -37,12 +37,14 @@ export type Dashboard = ReturnType<typeof createDashboard>;
  */
 export function createDashboard(app: App) {
   const { renderer, view } = app;
-  let shown = false;
   let sessions: acp.SessionInfo[] = [];
   let branch = "";
+  /** The session the recent list and branch were last looked up for. */
+  let fetchedFor: string | undefined;
 
   /** Empty means nothing but the one-line welcome. */
   const empty = () => app.transcript.entries.every((e) => e.item.type === "splash");
+  const keyOf = (id: string) => app.commands.list.find((c) => c.id === id)?.key ?? "";
 
   function actions(): Row[] {
     const { commands } = app;
@@ -55,7 +57,8 @@ export function createDashboard(app: App) {
       { icon: "≡", label: "Command palette", right: "ctrl+p", run: () => commands.openPalette() },
       canResume ? cmd("sessions", "↺", "Resume session") : null,
       cmd("model", G.model, "Switch model"),
-      { icon: "⇄", label: "Cycle agent mode", right: "shift+tab", run: () => app.options.cycleMode() },
+      // The mode command opens a list; its key cycles instead (keys.ts).
+      { icon: "⇄", label: "Cycle agent mode", right: keyOf("mode"), run: () => app.options.cycleMode() },
       cmd("history", G.search, "Search prompt history"),
       cmd("init", G.edit, "Initialize project"),
       cmd("help", "?", "Keybindings"),
@@ -67,15 +70,15 @@ export function createDashboard(app: App) {
   function logo(big: boolean) {
     const th = app.look.th;
     const art = big ? LOGO : LOGO_SMALL;
-    const w = Math.max(...art.map((l) => [...l].length));
+    const w = art[0]!.length;
     const lines = art.map((l, r) => {
-      const chars = [...l.padEnd(w)];
-      return chars.map((ch, c) => {
+      // Monochrome themes fade top to bottom; the others run left to right, primary to secondary.
+      const across = th.mono ? null : gradient(l, th.primary, th.secondary, { bold: true, span: w });
+      const down = blend(th.fg, th.fgDim, r / Math.max(1, art.length - 1));
+      return [...l].map((ch, c) => {
         if (ch === " ") return ch;
         if (OUTLINE.has(ch)) return fg(th.fgGutter)(ch);
-        // Monochrome themes fade top to bottom; the others run left to right, primary to secondary.
-        const color = th.mono ? blend(th.fg, th.fgDim, r / Math.max(1, art.length - 1)) : blend(th.primary, th.secondary, c / Math.max(1, w - 1));
-        return bold(fg(color)(ch));
+        return across ? across[c]! : bold(fg(down)(ch));
       });
     });
     return styled(...lines.flatMap((l, i) => (i ? ["\n", ...l] : l)));
@@ -87,39 +90,22 @@ export function createDashboard(app: App) {
     return node;
   }
 
-  /** A section's name and a rule out to the edge of the column. */
-  function heading(width: number, name: string) {
-    const th = app.look.th;
-    // Indented one cell, under the rows' icons.
-    line(styled(" ", bold(fg(th.fgDim)(name)), fg(th.separatorSubtle)(" " + G.rule.repeat(Math.max(0, width - name.length - 3)) + " ")), { marginTop: 1, width });
-  }
-
   /** A clickable row: an icon, the label, dotted leaders, then its key or time. Hovering lifts it. */
-  function row(width: number, r: Row, tone: { icon: string; label: string; right: string }) {
+  function row(width: number, r: Row, tone: { icon: string; label: string; right: string }, extra: Record<string, unknown> = {}) {
     const th = app.look.th;
     const room = width - r.right.length - 6;
     const text = trunc(r.label, room);
     const lead = Math.max(1, room - text.length);
     const draw = (hot: boolean) => {
-      const lift = (c: TextChunk) => (hot ? bg(th.bgRaised)(c) : c);
-      return styled(
-        lift(fg(hot ? th.fg : tone.icon)(` ${r.icon} `)),
-        lift((hot ? bold : (c: TextChunk) => c)(fg(hot ? th.fg : tone.label)(text))),
-        lift(fg(hot ? th.fgGutter : th.separatorSubtle)(" " + "·".repeat(lead) + " ")),
-        lift(fg(hot ? th.fgSubtle : tone.right)(r.right + " ")),
-      );
+      const [icon, label, dots, right] = hot ? [th.fg, th.fg, th.fgGutter, th.fgSubtle] : [tone.icon, tone.label, th.separatorSubtle, tone.right];
+      const name = fg(label)(text);
+      const chunks = [fg(icon)(` ${r.icon} `), hot ? bold(name) : name, fg(dots)(" " + "·".repeat(lead) + " "), fg(right)(r.right + " ")];
+      return styled(...(hot ? chunks.map((c) => bg(th.bgRaised)(c)) : chunks));
     };
-    const node = line(draw(false), { width });
+    const node = line(draw(false), { width, ...extra });
     node.onMouseDown = () => void r.run();
     node.onMouseOver = () => (node.content = draw(true));
     node.onMouseOut = () => (node.content = draw(false));
-  }
-
-  function clearNodes() {
-    for (const c of view.dashboard.getChildren()) {
-      view.dashboard.remove(c);
-      c.destroyRecursively();
-    }
   }
 
   /**
@@ -127,21 +113,27 @@ export function createDashboard(app: App) {
    * short: the big logo, then the recent sessions, then the actions.
    */
   function draw() {
-    if (!shown) return;
-    clearNodes();
-    const th = app.look.th;
+    clearChildren(view.dashboard);
+    if (!shown()) return;
     const { options, agent } = app;
+    const id = agent?.sessionId;
+    if (id && id !== fetchedFor) {
+      fetchedFor = id;
+      void refresh(id);
+    }
+    const th = app.look.th;
     const width = Math.min(MAX_WIDTH, renderer.width - 6);
     // What is left above the prompt and the status line.
     const room = renderer.height - 6;
     const rows = actions();
-    const recent = sessions.filter((s) => s.sessionId !== agent?.sessionId).slice(0, RECENT);
+    const recent = sessions.slice(0, RECENT);
 
-    // Small logo (2), tagline (2), actions (1 + n), context (2).
+    // Small logo (2), tagline (2), actions (1 + n), context (2); then the recent list (2 + n).
     const base = LOGO_SMALL.length + 2 + 1 + rows.length + 2;
+    const recentRows = 2 + recent.length;
     const fitsActions = room >= base;
-    const fitsRecent = recent.length > 0 && room >= base + 2 + recent.length;
-    const used = fitsRecent ? base + 2 + recent.length : base;
+    const fitsRecent = recent.length > 0 && room >= base + recentRows;
+    const used = base + (fitsRecent ? recentRows : 0);
     const big = renderer.width >= LOGO[0]!.length + 4 && room >= used + LOGO.length - LOGO_SMALL.length;
 
     line(logo(big), { truncate: false });
@@ -152,21 +144,14 @@ export function createDashboard(app: App) {
 
     const accent = th.mono ? th.fgMuted : th.primary;
     if (fitsActions) {
-      const first = view.dashboard.getChildren().length;
-      for (const r of rows) row(width, r, { icon: accent, label: th.fgSubtle, right: th.fgDim });
-      const top = view.dashboard.getChildren()[first];
-      if (top) top.marginTop = 1;
-    } else line(styled(fg(th.fgDim)("ctrl+p"), fg(th.fgGutter)(" commands  ·  "), fg(th.fgDim)("ctrl+g"), fg(th.fgGutter)(" keys")), { marginTop: 1 });
+      rows.forEach((r, i) => row(width, r, { icon: accent, label: th.fgSubtle, right: th.fgDim }, i ? {} : { marginTop: 1 }));
+    } else line(styled(fg(th.fgDim)("ctrl+p"), fg(th.fgGutter)(" commands  ·  "), fg(th.fgDim)(keyOf("help")), fg(th.fgGutter)(" keys")), { marginTop: 1 });
 
     if (fitsRecent) {
-      heading(width, "Recent");
+      // Indented one cell, under the rows' icons.
+      line(styled(" ", ...sectionTitle(th, "Recent", width - 2), " "), { marginTop: 1, width });
       for (const s of recent) {
-        const r: Row = {
-          icon: G.bullet,
-          label: (s.title ?? s.sessionId).split("\n")[0]!,
-          right: timeAgo(s.updatedAt),
-          run: () => app.conversation.loadSession(s.sessionId, s.title ?? ""),
-        };
+        const r: Row = { icon: G.bullet, label: sessionLabel(s, width), right: timeAgo(s.updatedAt), run: () => app.conversation.loadSession(s.sessionId, s.title ?? "") };
         row(width, r, { icon: th.fgGutter, label: th.fgMuted, right: th.fgGutter });
       }
     }
@@ -181,32 +166,32 @@ export function createDashboard(app: App) {
     line(styled(...ctx), { marginTop: 1, maxWidth: renderer.width - 4 });
   }
 
+  const shown = () => view.dashboard.visible;
+
   /**
    * Shows the dashboard when the transcript is empty and hides it at its first entry.
    * Cheap when nothing changed: the transcript calls it on every entry it adds.
    */
   function sync() {
     const want = empty();
-    if (want === shown) return;
-    shown = want;
-    view.dashboard.visible = shown;
-    view.scroll.visible = !shown;
-    view.filler.visible = !shown;
-    if (!shown) clearNodes();
+    if (want === shown()) return;
+    view.dashboard.visible = want;
+    view.scroll.visible = view.filler.visible = !want;
     app.chrome.layout();
   }
 
-  /** Looks up the recent sessions and the git branch again, then redraws. */
-  async function refresh() {
-    const agent = app.agent;
+  /** Looks up the recent sessions and the git branch for session `id`, then redraws. */
+  async function refresh(id: string) {
     const [list, head] = await Promise.all([
-      agent?.capabilities.loadSession ? agent.listSessions().catch(() => []) : Promise.resolve([]),
+      app.conversation.earlierSessions(),
       Bun.$`git -C ${app.cwd} branch --show-current`
         .quiet()
         .nothrow()
         .text()
         .catch(() => ""),
     ]);
+    // A newer session started meanwhile and looked up its own.
+    if (id !== fetchedFor) return;
     sessions = list;
     branch = head.trim();
     draw();
@@ -215,9 +200,8 @@ export function createDashboard(app: App) {
   return {
     sync,
     draw,
-    refresh,
     get shown() {
-      return shown;
+      return shown();
     },
   };
 }

@@ -9,9 +9,7 @@ let pending: Promise<string[]> | null = null;
 async function scan(cwd: string): Promise<string[]> {
   let files: string[] = [];
   try {
-    const git = Bun.spawn(["git", "ls-files", "--cached", "--others", "--exclude-standard"], { cwd, stdout: "pipe", stderr: "ignore" });
-    const out = await new Response(git.stdout).text();
-    if ((await git.exited) !== 0) throw new Error("not a git repository");
+    const out = await Bun.$`git ls-files --cached --others --exclude-standard`.cwd(cwd).quiet().text();
     files = out.split("\n").filter(Boolean);
   } catch {
     for await (const f of new Bun.Glob("**/*").scan({ cwd, onlyFiles: true, dot: false })) {
