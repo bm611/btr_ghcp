@@ -14,7 +14,7 @@ import {
   fg,
   italic,
 } from "@opentui/core";
-import { clipLines, formatBytes, formatDuration, truncStart } from "../core/format";
+import { clipLines, formatBytes, formatDuration, oneLine, truncStart } from "../core/format";
 import { patchStats, toolFileChanges, toolHeader, toolMetrics, toolOutput, toolPatches, toolSummary, type ToolState } from "../core/tools";
 import { type GlowPalette, type MarkdownStyle, glowBullets, glowHooks } from "./glow";
 import { styled, todoLine, toneColor, toneGlyph, type Tone } from "./text";
@@ -77,7 +77,9 @@ export type Entry<T extends Item = Item> = {
   expanded?: boolean;
   /** The Markdown view of a streaming reply, appended to in place. */
   md?: MarkdownRenderable;
-  /** The text node of a streaming thought, updated in place. */
+  /** The header line of a streaming thought, updated in place in compact mode. */
+  thoughtHead?: TextRenderable;
+  /** The text node of a streaming thought, updated in place when expanded. */
   thoughtBody?: TextRenderable;
   /** The status icon of a tool call, which blinks while it runs. */
   dot?: TextRenderable;
@@ -179,6 +181,7 @@ export class Transcript {
   update(entry: Entry) {
     const old = entry.node;
     entry.md = undefined;
+    entry.thoughtHead = undefined;
     entry.thoughtBody = undefined;
     entry.dot = undefined;
     entry.node = this.build(entry);
@@ -196,15 +199,36 @@ export class Transcript {
     if (this.ctx.markdown().style === "glow") this.bullets(entry.md);
   }
 
+  /** Formats the single-line header for a thought entry. */
+  private thoughtHeader(entry: Entry<Extract<Item, { type: "thought" }>>): StyledText {
+    const th = this.ctx.theme();
+    const item = entry.item;
+    const expanded = !!entry.expanded || this.ctx.verbose();
+    const label = item.ms === undefined ? "Thinking" : `Thought${item.ms >= 1000 ? ` for ${formatDuration(item.ms)}` : ""}`;
+    const trimmed = item.text.trim();
+    if (!expanded && trimmed && item.ms === undefined) {
+      const lastLine = trimmed.split("\n").findLast((l) => l.trim()) ?? trimmed;
+      return styled(fg(th.fgDim)(`${G.pending} ${label} `), fg(th.fgMuted)(oneLine(lastLine, 72)));
+    }
+    const chevron = trimmed ? fg(th.fgGutter)(` ${expanded ? G.open : G.closed}`) : "";
+    return styled(fg(th.fgDim)(`${G.pending} ${label}`), chevron);
+  }
+
   /** Appends streamed thinking text in place without rebuilding the entry tree. */
   appendThought(entry: Entry<Extract<Item, { type: "thought" }>>, text: string) {
-    const hadText = !!entry.item.text.trim();
     entry.item.text += text;
-    if (!entry.thoughtBody || !hadText) return this.update(entry);
-    const th = this.ctx.theme();
-    const trimmed = entry.item.text.trim();
-    const shown = this.ctx.verbose() ? trimmed : clipLines(trimmed, 3).text;
-    entry.thoughtBody.content = styled(italic(fg(th.fgMuted)(shown)));
+    if (entry.thoughtBody) {
+      const th = this.ctx.theme();
+      const trimmed = entry.item.text.trim();
+      const shown = this.ctx.verbose() || entry.expanded ? trimmed : clipLines(trimmed, 3).text;
+      entry.thoughtBody.content = styled(italic(fg(th.fgMuted)(shown)));
+      return;
+    }
+    if (entry.thoughtHead) {
+      entry.thoughtHead.content = this.thoughtHeader(entry);
+      return;
+    }
+    this.update(entry);
   }
 
   /** Swaps a reply's bullets once its list markers are drawn, which happens in the frame's layout. */
@@ -414,16 +438,14 @@ export class Transcript {
 
     switch (item.type) {
       case "group": {
-        // "▸ 3 tool calls (1 read, 1 bash, 1 edit)  +3 -2  src/greet.ts  thought 2s · ctrl+d or click"
+        // "▸ 3 tool calls (1 read, 1 bash, 1 edit) · ctrl+d or click", then one "  path +a -r" line per edited file.
         const open = item.expanded || verbose;
         const tools = item.members.flatMap((m) => (m.item.type === "tool" ? [m.item.tool] : []));
         const counts = new Map<string, number>();
         const touched = new Map<string, { added: number; removed: number }>();
-        let totalMs = 0;
         for (const t of tools) {
           const label = TOOLS[toolHeader(t, this.ctx.cwd).name]?.label ?? "other";
           counts.set(label, (counts.get(label) ?? 0) + 1);
-          if (t.startedAt !== undefined && t.endedAt !== undefined) totalMs += Math.max(0, t.endedAt - t.startedAt);
           for (const c of toolFileChanges(t, this.ctx.cwd)) {
             const cur = touched.get(c.path) ?? { added: 0, removed: 0 };
             cur.added += c.added;
@@ -432,10 +454,6 @@ export class Transcript {
           }
         }
         const failed = tools.filter((t) => t.status === "failed");
-        const thought = item.members.reduce((n, m) => n + (m.item.type === "thought" ? (m.item.ms ?? 0) : 0), 0);
-        const hasThought = item.members.some((m) => m.item.type === "thought");
-        const netAdded = [...touched.values()].reduce((n, f) => n + f.added, 0);
-        const netRemoved = [...touched.values()].reduce((n, f) => n + f.removed, 0);
 
         const chunks: TextChunk[] = [fg(th.fgDim)(`${open ? G.open : G.closed} `)];
         const sep = () => {
@@ -453,44 +471,40 @@ export class Transcript {
           sep();
           chunks.push(fg(th.error)(`${failed.length} failed`));
         }
-        if (netAdded || netRemoved) {
-          sep();
-          chunks.push(...this.diffStats(netAdded, netRemoved));
-        }
-        if (!open && touched.size) {
-          sep();
-          const paths = [...touched.keys()];
-          chunks.push(fg(th.fgMuted)(paths.length === 1 ? truncStart(paths[0]!, 24) : `${paths.length} files`));
-        }
-        if (hasThought) {
-          sep();
-          chunks.push(fg(th.fgDim)(thought >= 1000 ? `thought ${formatDuration(thought)}` : "thought"));
-        }
-        if (totalMs >= 1000) {
-          sep();
-          chunks.push(fg(th.fgDim)(`tools ${formatDuration(totalMs)}`));
-        }
         if (!verbose) {
           sep();
           chunks.push(fg(th.fgGutter)(open ? "click to fold" : "ctrl+d or click"));
         }
 
+        const toggle = () => this.toggle(entry as Entry<Extract<Item, { type: "group" }>>);
         const header = this.text(styled(...chunks), th.fgDim, { flexShrink: 1, wrapMode: "none", truncate: true });
-        header.onMouseDown = () => this.toggle(entry as Entry<Extract<Item, { type: "group" }>>);
-        if (!open && failed.length) {
-          const box = this.column();
-          box.add(header);
-          const firstFail = toolHeader(failed[0]!, this.ctx.cwd);
+        header.onMouseDown = toggle;
+        // Folded, each edited file gets its own line under the summary: "  src/greet.ts +3 -2".
+        const fileLines = open
+          ? []
+          : [...touched]
+              .filter(([, f]) => f.added || f.removed)
+              .map(([path, f]) => styled(fg(th.fgMuted)(`  ${truncStart(path, 48)} `), ...this.diffStats(f.added, f.removed)));
+        const failLine = !open && failed.length ? toolHeader(failed[0]!, this.ctx.cwd) : undefined;
+        if (!fileLines.length && !failLine) return header;
+
+        const box = this.column();
+        box.add(header);
+        for (const line of fileLines) {
+          const row = this.text(line, th.fgMuted, { flexShrink: 1, wrapMode: "none", truncate: true });
+          row.onMouseDown = toggle;
+          box.add(row);
+        }
+        if (failLine) {
           const sub = this.text(
-            styled(fg(th.error)(`  ${G.fail} ${firstFail.name}${firstFail.arg ? ` ${truncStart(firstFail.arg, 48)}` : ""}`)),
+            styled(fg(th.error)(`  ${G.fail} ${failLine.name}${failLine.arg ? ` ${truncStart(failLine.arg, 48)}` : ""}`)),
             th.error,
             { flexShrink: 1, wrapMode: "none", truncate: true },
           );
-          sub.onMouseDown = () => this.toggle(entry as Entry<Extract<Item, { type: "group" }>>);
+          sub.onMouseDown = toggle;
           box.add(sub);
-          return box;
         }
-        return header;
+        return box;
       }
 
       case "splash":
@@ -539,22 +553,35 @@ export class Transcript {
       }
 
       case "thought": {
-        const box = this.column();
-        const label = item.ms === undefined ? "Thinking" : `Thought${item.ms >= 1000 ? ` for ${formatDuration(item.ms)}` : ""}`;
-        box.add(this.text(`${G.pending} ${label}`, th.fgDim));
-        if ((verbose || item.ms === undefined) && item.text.trim()) {
-          // The thinking itself sits behind a faint bar, so it reads apart from the reply.
-          const bar = this.barred(th.separatorSubtle);
-          const shown = verbose ? item.text.trim() : clipLines(item.text.trim(), 3).text;
-          entry.thoughtBody = this.text(styled(italic(fg(th.fgMuted)(shown))), th.fgMuted, { flexShrink: 1 });
-          bar.add(entry.thoughtBody);
-          box.add(bar);
+        const thoughtEntry = entry as Entry<Extract<Item, { type: "thought" }>>;
+        const expanded = verbose || !!entry.expanded;
+        const head = this.text(this.thoughtHeader(thoughtEntry), th.fgDim, {
+          flexShrink: 1,
+          wrapMode: "none",
+          truncate: true,
+        });
+        entry.thoughtHead = head;
+        if (item.text.trim()) {
+          head.onMouseDown = () => {
+            entry.expanded = !entry.expanded;
+            this.update(entry);
+          };
         }
+        if (!expanded || !item.text.trim()) return head;
+        const box = this.column();
+        box.add(head);
+        // The expanded thinking sits behind a faint bar, so it reads apart from the reply.
+        const bar = this.barred(th.separatorSubtle);
+        const trimmed = item.text.trim();
+        const shown = verbose || entry.expanded ? trimmed : clipLines(trimmed, 3).text;
+        entry.thoughtBody = this.text(styled(italic(fg(th.fgMuted)(shown))), th.fgMuted, { flexShrink: 1 });
+        bar.add(entry.thoughtBody);
+        box.add(bar);
         return box;
       }
 
       case "tool": {
-        // "● Ran ls -la src  9 lines  420ms ✓", its output behind a thin rail.
+        // Single-line by default while running ("● Ran ls -la src  10 lines  420ms ✓ ▸"); click or ctrl+d expands output.
         const tool = item.tool;
         const box = this.column();
         const { name, arg } = toolHeader(tool, this.ctx.cwd);
@@ -564,6 +591,7 @@ export class Transcript {
         const patches = toolPatches(tool, this.ctx.cwd);
         const summary = toolSummary(tool, this.ctx.cwd);
         const metrics = toolMetrics(tool, this.ctx.cwd);
+        const expanded = !!entry.expanded || verbose;
 
         const dotColor =
           tool.status === "failed"
@@ -578,21 +606,23 @@ export class Transcript {
         head.add(entry.dot);
 
         const meta: TextChunk[] = [];
-        if (metrics.added || metrics.removed) {
+        if (patches.length && tool.status === "pending") {
+          meta.push(fg(th.fgDim)(`  waiting for approval${G.ellipsis}`));
+        } else if (metrics.added || metrics.removed) {
           meta.push(fg(th.fgGutter)("  "), ...this.diffStats(metrics.added, metrics.removed));
-        } else if (tool.status === "completed" && !summary && metrics.lines > 0) {
-          meta.push(fg(th.fgGutter)(`  ${metrics.lines} line${metrics.lines === 1 ? "" : "s"}`));
         } else if (tool.status === "completed" && name === "Fetch" && metrics.bytes > 0) {
           meta.push(fg(th.fgGutter)(`  ${formatBytes(metrics.bytes)}`));
+        } else if (tool.status === "completed" && name === "Search") {
+          meta.push(fg(th.fgGutter)(metrics.lines ? `  ${metrics.lines} line${metrics.lines === 1 ? "" : "s"}` : "  no matches"));
+        } else if (tool.status === "completed" && metrics.lines > 0) {
+          meta.push(fg(th.fgGutter)(`  ${metrics.lines} line${metrics.lines === 1 ? "" : "s"}`));
         }
         if (metrics.ms !== undefined && metrics.ms >= 150) {
           meta.push(fg(th.fgGutter)(`  ${metrics.ms < 1000 ? `${metrics.ms}ms` : formatDuration(metrics.ms)}`));
         }
 
-        const collapsible =
-          patches.some((p) => p.split("\n").length > DIFF_CLIP) ||
-          (!!output && (metrics.lines > CLIP || !!summary));
-        const chevron = collapsible ? fg(th.fgGutter)(` ${entry.expanded || verbose ? G.open : G.closed}`) : "";
+        const collapsible = patches.some((p) => p.split("\n").length > DIFF_CLIP) || (!!output && tool.status !== "failed");
+        const chevron = collapsible ? fg(th.fgGutter)(` ${expanded ? G.open : G.closed}`) : "";
         const mark =
           tool.status === "completed"
             ? fg(th.success)(` ${G.check}`)
@@ -619,22 +649,18 @@ export class Transcript {
             this.update(entry);
           };
         }
-        box.add(head);
 
         const out = this.barred(tool.status === "failed" ? th.error : th.separatorSubtle);
         if (tool.status === "failed") this.outputLines(out, output || "Failed", th.fgMuted, entry);
-        else if (patches.length && tool.status === "pending") out.add(this.text(`Waiting for approval${G.ellipsis}`, th.fgDim));
+        else if (patches.length && tool.status === "pending") return head;
         else if (patches.length) {
           out.add(this.text(summary, th.fgMuted));
           for (const p of patches) this.addPatch(out, p, entry);
-        } else if (summary) {
-          out.add(this.text(summary, th.fgMuted));
-          // Details or explicit click expand show the read/search preview.
-          if ((entry.expanded || verbose) && output) {
-            this.outputLines(out, output, th.fgMuted, entry, !entry.expanded, entry.expanded ? VERBOSE_CLIP : PREVIEW);
-          }
-        } else if (output) this.outputLines(out, output, th.fgMuted, entry);
-        else return box;
+        } else if (expanded && (summary || output)) {
+          if (summary) out.add(this.text(summary, th.fgMuted));
+          if (output) this.outputLines(out, output, th.fgMuted, entry, !entry.expanded, entry.expanded ? VERBOSE_CLIP : PREVIEW);
+        } else return head;
+        box.add(head);
         box.add(out);
         return box;
       }

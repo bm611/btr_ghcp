@@ -76,20 +76,36 @@ test(
     await submit("show me a demo");
     let screen = await screenUntil((s) => s.includes("Permission needed"));
     expect(screen).toContain("$ ls -la src");
+    // Live mode keeps Read single-line (no "Read 1 line" bar line) until expanded
+    expect(screen).toContain("Read package.json");
+    expect(screen).not.toContain("Read 1 line");
     keys().pressKey("a");
     screen = await screenUntil((s) => s.includes("Permission needed") && s.includes("greet"));
+    expect(screen).not.toContain("file0.ts");
     expect(screen).toContain("+   const mark = excited");
     keys().pressKey("a");
     // The turn folds once it ends.
     screen = await screenUntil((s) => s.includes("tool calls"));
     expect(screen).toContain("That's all.");
     expect(screen).toContain("▸ 3 tool calls (1 read, 1 bash, 1 edit)");
-    expect(screen).toContain("+3 -2");
-    expect(screen).toContain("src/greet.ts");
+    // Edited files sit one per line under the summary, which no longer shows timings.
+    const summary = screen.split("\n").findIndex((line) => line.includes("▸ 3 tool calls"));
+    expect(screen.split("\n")[summary + 1]).toContain("src/greet.ts +3 -2");
+    expect(screen).not.toMatch(/thought \d|tools \d/);
     expect(screen).toContain("copy");
     const contextLine = screen.split("\n").find((line) => line.includes("ctx ") && line.includes("12%"));
     expect(contextLine?.trimEnd()).toMatch(/ctx .*12%$/);
     expect(contextLine).not.toContain("15.4k/128k");
+    // ctrl+d expands the folded turn and reveals tool output
+    keys().pressKey("d", { ctrl: true });
+    await screenUntil((s) => s.includes("details"));
+    keys().pressKey("\x1b[5~");
+    keys().pressKey("\x1b[5~");
+    screen = await screenUntil((s) => s.includes("file0.ts"));
+    expect(screen).toContain("Ran ls -la src");
+    keys().pressKey("d", { ctrl: true });
+    keys().pressKey("END", { ctrl: true });
+    await screenUntil((s) => !s.includes("file0.ts") && !s.includes("details"));
   },
   TIMEOUT,
 );

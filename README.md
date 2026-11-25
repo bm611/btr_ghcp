@@ -6,6 +6,9 @@ btr launches an ACP agent in the current directory and displays the session. The
 
 ## Recent changes
 
+- **Improved TUI rendering** (2026-11-25): compact context and diff bars, clearer tool-call summaries, and more readable thought, theme, and status-line rendering. Live tool output stays concise until expanded, while finished turns fold into a grouped summary.
+- Added transcript search and diff wrapping, with `Ctrl+F` and `/wrap` controls.
+- Filtered duplicate `@file` attachments when the mention is already present in the prompt.
 - **Refactored the codebase** (2026-11-21): split the application into focused `agent/`, `core/`, `ui/`, and `tui/` modules instead of the previous monolithic `agent.ts` and `tui.ts` files.
 - Added dedicated CLI, agent, core, UI, settings, and TUI test coverage.
 - Added modular Copilot configuration support and a headless CLI entry point.
@@ -59,6 +62,7 @@ btr [options] [prompt]
 | `Ctrl+O` | Edit the prompt in `$VISUAL` / `$EDITOR` |
 | `Alt+S` | Stash the prompt; again on an empty prompt to restore it |
 | `Ctrl+V` | Paste an image from the clipboard (macOS). Dragging an image file in works too |
+| `Ctrl+F` | Search the transcript |
 
 A paste longer than four lines folds into `[Pasted text #1 +12 lines]` and expands when sent.
 
@@ -79,19 +83,19 @@ A paste longer than four lines folds into `[Pasted text #1 +12 lines]` and expan
 | `Ctrl+C` | Clear the prompt, else interrupt, else (twice) quit |
 | `Ctrl+Z` | Suspend; `fg` resumes |
 
-While a turn runs, its thinking and tool calls show as they happen. When it ends they fold into one line above the reply, such as `▸ ⚙ 8 tool calls  ≡ 6  ⌕ 1  $ 1  ∴ 3s`. The icons are `≡` read, `⌕` search, `$` shell command, `✎` edit, `✚` new file, `⌫` delete, `⇢` move, `⇣` fetch, `✗` failed and `∴` thinking time. Click the line to expand or fold that turn. Errors and warnings stay in view.
+While a turn runs, its thinking and tool calls show as they happen. Tool calls keep a compact header and preview; click a header or use `Ctrl+D` to reveal more detail. Thinking also has a compact live line that can be expanded by clicking it. When a turn ends, its work folds above the reply into a summary such as `▸ 3 tool calls (1 read, 1 bash, 1 edit) · ctrl+d or click`, with one line per edited file beneath it (`src/greet.ts +3 -2`). Diff stats omit zero counts. Errors and warnings stay in view.
 
 Selecting text with the mouse copies it. When a turn ends or needs approval while the terminal is unfocused, the terminal bell rings.
 
 Permission requests open a panel at the bottom with what the tool wants, the command (`$ …`) or diff, and numbered choices. Pick with `1`–`3`, `↑`/`↓` and `Enter`, or press `a` (allow), `s` (allow for the session) or `d` (deny); `Esc` declines and interrupts the turn.
 
-The status line keeps agent behavior and tool approval separate: `permissions: ask` (or `permissions: full access`) · model · `agent: plan` when the agent mode is not the default · context `15.4k/128k 12%`. Messages flash in its place for a moment. With Copilot's `auto` model the line shows what auto picked for the latest turn, as `auto → mai code 2 flash`. ACP only ever reports `auto`, so btr reads that from the event log Copilot keeps in `~/.copilot/session-state/<session>/events.jsonl` (or under `$COPILOT_HOME`); other agents just show their model.
+The status line keeps agent behavior and tool approval separate: `permissions: ask` (or `permissions: full access`) · model · `agent: plan` when the agent mode is not the default · context `ctx ━━━━━ 12%`. The context bar becomes a warning color at 80% usage. Messages flash in its place for a moment. With Copilot's `auto` model the line shows what auto picked for the latest turn, as `auto → mai code 2 flash`. ACP only ever reports `auto`, so btr reads that from the event log Copilot keeps in `~/.copilot/session-state/<session>/events.jsonl` (or under `$COPILOT_HOME`); other agents just show their model.
 
 The sidebar, off by default, shows the session title and directory, the model and agent mode, a context-usage bar, the files the agent changed with their line counts, the to-do list, and the current tool permission setting.
 
 ## Commands
 
-Everything is in the palette (`Ctrl+P`). Besides the shortcuts above, it has Copy Last Reply, Export Conversation, Show Git Diff, Session Info, Usage, Initialize Project, Compact Conversation, Themes, Markdown Style, Toggle Background Color, Toggle Notifications and Sign In. Its Agent tab lists the agent's own commands and skills; one that takes arguments is put in the prompt for you to finish.
+Everything is in the palette (`Ctrl+P`). Besides the shortcuts above, it has Copy Last Reply, Search Transcript, Export Conversation, Show Git Diff, Session Info, Usage, Initialize Project, Compact Conversation, Themes, Markdown Style, Toggle Diff Wrap, Toggle Background Color, Toggle Notifications and Sign In. Its Agent tab lists the agent's own commands and skills; one that takes arguments is put in the prompt for you to finish.
 
 Commands can also be typed, for example from history or after the palette fills them in:
 
@@ -104,6 +108,7 @@ Commands can also be typed, for example from history or after the palette fills 
 | `/permissions`, `/sidebar`, `/details`, `/todos`, `/keys` | Tool approval and display toggles |
 | `/status`, `/cost` | Session info and usage |
 | `/copy`, `/export [file]`, `/diff` | Copy the last reply, save the conversation as Markdown, show uncommitted changes |
+| `/find`, `/search`, `/wrap` | Search the transcript, toggle diff wrapping |
 | `/theme [auto\|fx\|fx-light\|charm\|daylight]` | Theme |
 | `/login`, `/exit`, `/quit` | Sign-in help, quit |
 
